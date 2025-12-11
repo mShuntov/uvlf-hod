@@ -15,9 +15,9 @@ def get_halo_mass_function(z, M_min=6, M_max=15, num_points=None,
     z : float
         Redshift
     M_min : float, optional
-        Minimum log10(M/M_sun). Default is 6.
+        Minimum log10(M/M_sun) in physical units. Default is 6.
     M_max : float, optional
-        Maximum log10(M/M_sun). Default is 15.
+        Maximum log10(M/M_sun) in physical units. Default is 15.
     num_points : int, optional
         Number of mass bins. Default is from config.
     mdef : str, optional
@@ -28,36 +28,43 @@ def get_halo_mass_function(z, M_min=6, M_max=15, num_points=None,
     Returns
     -------
     log10_mass : ndarray
-        Array of log10(M/M_sun) including h factor
+        Array of log10(M/M_sun) in physical units
     hmf : ndarray
-        Halo mass function dn/dln(M) in units of h^3 Mpc^-3
+        Halo mass function dn/dln(M) in physical units of Mpc^-3
         
     Notes
     -----
-    The mass is returned in units that include h: M [M_sun/h]
-    The HMF is returned in units that include h^3: dn/dlnM [h^3 Mpc^-3]
+    Colossus expects mass in M_sun/h and returns dn/dlnM in (h/Mpc)^3.
+    To convert between physical and comoving units:
+    - Mass: M [M_sun/h] = M [M_sun] * h  (factor out h by multiplying)
+    - HMF: dn/dlnM [Mpc^-3] = dn/dlnM [(h/Mpc)^3] * h^3  (evaluate h)
     """
     if num_points is None:
         num_points = HMF_NUM_POINTS
     
-    # Create mass array (without h initially)
-    log10_mass_noh = np.linspace(M_min, M_max, num_points)
-    mass_noh = 10**log10_mass_noh
+    h = 0.7  # H0/100
     
-    # Get HMF from Colossus (in comoving units without h)
-    hmf_noh = mass_function.massFunction(
-        mass_noh, z, 
+    # Create mass array in physical units [M_sun]
+    log10_mass_physical = np.linspace(M_min, M_max, num_points)
+    mass_physical = 10**log10_mass_physical
+    
+    # Convert to comoving units for Colossus [M_sun/h]
+    # To factor out h: M [M_sun/h] = M [M_sun] * h
+    mass_comoving = mass_physical * h
+    
+    # Get HMF from Colossus in comoving units [(h/Mpc)^3]
+    hmf_comoving = mass_function.massFunction(
+        mass_comoving, z, 
         mdef=mdef, 
         model=model, 
         q_out='dndlnM'
     )
     
-    # Convert to include h factors
-    h = 0.7  # H0/100
-    log10_mass = log10_mass_noh - np.log10(h)  # M [M_sun/h]
-    hmf = hmf_noh * np.log(10) * h**3  # dn/dlnM [h^3 Mpc^-3]
+    # Convert HMF to physical units [Mpc^-3]
+    # To evaluate h: dn/dM [Mpc^-3] = dn/dlnM [(h/Mpc)^3] * h^3 * ln(10)
+    hmf_physical = hmf_comoving * np.log(10) * h**3
     
-    return log10_mass, hmf
+    return log10_mass_physical, hmf_physical
 
 
 def get_halo_bias(M, z, mdef='vir', model='tinker10'):
@@ -66,7 +73,7 @@ def get_halo_bias(M, z, mdef='vir', model='tinker10'):
     Parameters
     ----------
     M : float or array_like
-        Halo mass in M_sun (without h factor)
+        Halo mass in M_sun (physical units)
     z : float
         Redshift
     mdef : str, optional
@@ -77,9 +84,16 @@ def get_halo_bias(M, z, mdef='vir', model='tinker10'):
     Returns
     -------
     b : float or ndarray
-        Halo bias
+        Halo bias (dimensionless)
+        
+    Notes
+    -----
+    Colossus expects mass in M_sun/h.
+    To factor out h: M [M_sun/h] = M [M_sun] * h
     """
-    return bias.haloBias(M, model=model, z=z, mdef=mdef)
+    h = 0.7  # H0/100
+    M_comoving = np.atleast_1d(M) * h  # Convert to M_sun/h
+    return bias.haloBias(M_comoving, model=model, z=z, mdef=mdef)
 
 
 class HaloMassFunction:

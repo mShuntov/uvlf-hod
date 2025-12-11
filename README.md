@@ -2,19 +2,19 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub](https://img.shields.io/github/stars/mshuntov/uvlf-hod?style=social)](https://github.com/mshuntov/uvlf-hod)
 
 A Python package for modeling UV luminosity functions and galaxy clustering using Halo Occupation Distribution (HOD) models for high-redshift galaxies.
 
 ## Features
 
+- **Unified Model Architecture**: Single class interface for all calculations
 - **UV-Halo Mass Relation (UVHMR)**: Connect halo mass to UV luminosity through star formation
 - **Halo Occupation Distribution**: Model central and satellite galaxy populations
 - **Luminosity Functions**: Compute UV luminosity functions at high redshift
 - **Galaxy Bias**: Calculate galaxy clustering bias
 - **Dust Attenuation**: Self-consistent treatment following Bouwens+2013-14
 - **Flexible Parametrization**: Redshift-dependent model parameters
-- **Modern Python**: Clean API with type hints and comprehensive documentation
+- **Modern Python**: Clean API with class inheritance and comprehensive documentation
 
 ## Installation
 
@@ -27,7 +27,7 @@ pip install uvlf-hod
 ### From source
 
 ```bash
-git clone https://github.com/mshuntov/uvlf-hod.git
+git clone https://github.com/yourusername/uvlf-hod.git
 cd uvlf-hod
 pip install -e .
 ```
@@ -46,23 +46,27 @@ pip install -e .
 
 ```python
 import numpy as np
-from uvlf_hod import UVLuminosityFunction
+import matplotlib.pyplot as plt
+from uvlf_hod import HODModel
 
-# Define redshift and magnitude range
-z = 6.0
+# Create a unified model with all parameters
+model = HODModel(
+    z=6.0,           # Redshift
+    eps0=0.1,        # Star formation efficiency
+    Mc=10**11.5,     # Characteristic halo mass [M_sun]
+    a=0.6,           # Low-mass slope
+    b=0.35,          # High-mass slope
+    sigma_UV=0.35,   # UV magnitude scatter
+    Mcut=10**10,     # Satellite cutoff mass [M_sun]
+    Msat=10**12.5,   # Satellite normalization mass [M_sun]
+    asat=1.0         # Satellite power-law slope
+)
+
+# Compute luminosity function
 MUV = np.linspace(-22, -16, 20)
-
-# Set up model parameters
-uvhmr_params = [0.1, 11.5, 0.6, 0.35]  # [eps0, log10(Mc), a, b]
-nsat_params = [10.0, 12.5, 1.0]  # [log10(Mcut), log10(Msat), asat]
-sigma_UV = 0.35
-
-# Calculate luminosity function
-uvlf = UVLuminosityFunction(z, uvhmr_params, nsat_params, sigma_UV)
-phi = uvlf.compute(MUV)
+phi = model.luminosity_function(MUV)
 
 # Plot
-import matplotlib.pyplot as plt
 plt.semilogy(MUV, phi)
 plt.xlabel('$M_{UV}$')
 plt.ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]')
@@ -72,10 +76,8 @@ plt.show()
 ### Galaxy Bias Calculation
 
 ```python
-from uvlf_hod import compute_galaxy_bias
-
-# Calculate bias for magnitude bins
-bias = compute_galaxy_bias(MUV, z, uvhmr_params, nsat_params, sigma_UV)
+# Use the same model to compute bias
+bias = model.galaxy_bias(MUV)
 
 plt.plot(MUV, bias)
 plt.xlabel('$M_{UV}$')
@@ -86,19 +88,41 @@ plt.show()
 ### UV-Halo Mass Relation
 
 ```python
-from uvlf_hod.core import UVHaloMassRelation
-
-# Create UVHMR instance
-uvhmr = UVHaloMassRelation(z=6.0, eps0=0.1, Mc=10**11.5, a=0.6, b=0.35)
-
-# Get UV magnitude for halo mass
+# UVHMR methods are inherited
 Mh = 1e11  # M_sun
-MUV = uvhmr.MUV(Mh)
-print(f"Halo mass {Mh:.2e} M_sun -> MUV = {MUV:.2f}")
+MUV = model.MUV(Mh)
+sfr = model.sfr(Mh)
+
+print(f"Halo mass {Mh:.2e} M_sun:")
+print(f"  M_UV = {MUV:.2f}")
+print(f"  SFR = {sfr:.1f} M_sun/yr")
 
 # Inverse relation
-Mh_inv = uvhmr.Mhalo(MUV)
-print(f"MUV = {MUV:.2f} -> Halo mass {Mh_inv:.2e} M_sun")
+Mh_recovered = model.Mhalo(MUV)
+```
+
+### Mean Properties
+
+```python
+# Compute mean properties for galaxies above a threshold
+MUV_thresh = -20
+
+mean_mass = model.mean_halo_mass(MUV_thresh)
+mean_bias = model.mean_bias(MUV_thresh)
+
+print(f"Galaxies brighter than {MUV_thresh}:")
+print(f"  Mean halo mass: {10**mean_mass:.2e} M_sun")
+print(f"  Mean bias: {mean_bias:.2f}")
+```
+
+### Updating Parameters
+
+```python
+# Dynamically update parameters
+model.update_parameters(z=7.0, eps0=0.15)
+
+# Recompute with new parameters
+phi_new = model.luminosity_function(MUV)
 ```
 
 ## Documentation
@@ -112,31 +136,44 @@ uvlf_hod/
 ├── __init__.py          # Public API
 ├── config.py            # Configuration and constants
 ├── cosmology.py         # Halo mass function and bias
-├── core.py              # Core UVHMR calculations
-├── hod.py               # HOD models and LF calculations
+├── model.py             # Unified UVHMR and HOD models
 ├── luminosity.py        # UV luminosity and dust
 └── models/
-    ├── parametrization.py  # Redshift parametrizations
-    └── occupation.py       # Occupation function models
+    └── parametrization.py  # Redshift parametrizations
 ```
 
 ### Key Classes
 
-- `UVLuminosityFunction`: Main class for computing luminosity functions
-- `UVHaloMassRelation`: UV-halo mass relation calculations
-- `HaloMassFunction`: Halo mass function with caching
-- `HODModel`: Base class for HOD models
-- `CosmologyConfig`: Cosmology configuration
+- **`HODModel`**: Main class combining UVHMR + HOD (recommended for most users)
+- **`UVHMRModel`**: Base class for UV-halo mass relations only
+- **`HaloMassFunction`**: Halo mass function with caching
+- **`CosmologyConfig`**: Cosmology configuration
+
+## Model Architecture
+
+The package uses a clean inheritance hierarchy:
+
+```
+UVHMRModel (base class)
+├── Handles UV-halo mass relations
+├── Methods: sfr(), MUV(), Mhalo()
+└── Parameters: z, eps0, Mc, a, b
+
+HODModel (extends UVHMRModel)
+├── Inherits all UVHMR methods
+├── Adds occupation distributions
+├── Methods: Ncen(), Nsat(), luminosity_function(), galaxy_bias()
+└── Additional parameters: sigma_UV, Mcut, Msat, asat
+```
 
 ## Examples
 
 See the `examples/` directory for detailed examples:
 
-- `basic_usage.py`: Basic luminosity function calculation
-- `compute_luminosity_function.py`: Full LF with error handling
-- `galaxy_bias_calculation.py`: Computing galaxy bias
-- `redshift_evolution.py`: Parameter evolution with redshift
-- `fitting_observations.py`: Fitting to observational data
+- `basic_usage.ipynb`: Interactive Jupyter notebook with complete workflow
+- `unified_model_example.py`: Comprehensive Python script
+- `parameter_exploration.py`: Parameter sensitivity analysis
+- `multi_redshift.py`: Redshift evolution studies
 
 ## Physics Background
 
@@ -157,11 +194,19 @@ Galaxy occupation follows:
 
 ### Key Parameters
 
-- `eps0`: Star formation efficiency normalization
-- `Mc`: Characteristic halo mass
-- `a, b`: UVHMR slopes (low/high mass)
-- `sigma_UV`: UV magnitude scatter
-- `Mcut, Msat, asat`: Satellite parameters
+#### UVHMR Parameters
+
+- **eps0**: Star formation efficiency normalization (typical: 0.05-0.2)
+- **Mc**: Characteristic halo mass (typical: 10^11 - 10^12 M_sun)
+- **a**: Low-mass slope (typical: 0.4-0.8)
+- **b**: High-mass slope (typical: 0.2-0.5)
+
+#### HOD Parameters
+
+- **sigma_UV**: UV magnitude scatter (typical: 0.2-0.5 mag)
+- **Mcut**: Cutoff mass for satellites (typical: 10^9 - 10^11 M_sun)
+- **Msat**: Satellite normalization mass (typical: 10^11 - 10^13 M_sun)
+- **asat**: Satellite power-law slope (typical: 0.8-1.2)
 
 ## Testing
 

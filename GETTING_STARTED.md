@@ -449,10 +449,9 @@ pip install -r requirements.txt
 - Read the full [API documentation](docs/api/)
 - Check out the [Jupyter notebook](examples/basic_usage.ipynb)
 - Explore [additional examples](examples/)
-- Read the [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) if upgrading from old version
 
 ## Getting Help
 
-- Open an issue on [GitHub](https://github.com/yourusername/uvlf-hod/issues)
+- Open an issue on [GitHub](https://github.com/mshuntov/uvlf-hod/issues)
 - Check the examples directory
-- Contact: your.email@example.com
+- Contact: marko.shuntov@nbi.ku.dk

@@ -18,8 +18,6 @@ from .__version__ import __version__
 from .model import (
     UVHMRModel,
     HODModel,
-    UVHaloMassRelation,  # Alias for backwards compatibility
-    UVLuminosityFunction,  # Alias for backwards compatibility
 )
 
 # Cosmology

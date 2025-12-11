@@ -41,6 +41,7 @@ from .luminosity import (
 
 # HOD and LF calculations
 from .hod import (
+    UVLuminosityFunction,
     compute_luminosity_function,
     compute_galaxy_bias,
     compute_mean_halo_mass,
@@ -94,6 +95,7 @@ __all__ = [
     'SFR_from_MUV',
     
     # HOD
+    'UVLuminosityFunction',
     'compute_luminosity_function',
     'compute_galaxy_bias',
     'compute_mean_halo_mass',

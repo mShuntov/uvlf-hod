@@ -361,3 +361,249 @@ def compute_mean_bias(MUV_thresh, z, uvhmr_params, nsat_params, sigma_UV,
         return integrate.simpson(bg_integrand, x=log10_Mh) / ngal
     else:
         return np.nan
+
+
+
+class UVLuminosityFunction:
+    """Main class for computing UV luminosity functions.
+    
+    This class provides a convenient interface for calculating UV luminosity
+    functions with HOD models, including support for parameter variations and
+    multi-redshift calculations.
+    
+    Parameters
+    ----------
+    z : float
+        Redshift
+    uvhmr_params : list
+        UVHMR parameters [eps0, log10(Mc), a, b]
+    nsat_params : list
+        Satellite parameters [log10(Mcut), log10(Msat), asat]
+    sigma_UV : float
+        UV magnitude scatter
+    add_dust : bool, optional
+        Whether to include dust attenuation. Default is True.
+        
+    Attributes
+    ----------
+    z : float
+        Redshift
+    eps0, Mc, a, b : float
+        UVHMR parameters (Mc is converted from log)
+    Mcut, Msat, asat : float
+        Satellite parameters (Mcut and Msat converted from log)
+    sigma_UV : float
+        UV magnitude scatter
+    add_dust : bool
+        Whether dust is included
+        
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from uvlf_hod import UVLuminosityFunction
+    >>> 
+    >>> # Set up model
+    >>> uvhmr_params = [0.1, 11.5, 0.6, 0.35]
+    >>> nsat_params = [10.0, 12.5, 1.0]
+    >>> uvlf = UVLuminosityFunction(6.0, uvhmr_params, nsat_params, 0.35)
+    >>> 
+    >>> # Compute luminosity function
+    >>> MUV = np.linspace(-22, -16, 20)
+    >>> phi = uvlf.compute(MUV)
+    >>> 
+    >>> # Get galaxy bias
+    >>> bias = uvlf.compute_bias(MUV)
+    """
+    
+    def __init__(self, z, uvhmr_params, nsat_params, sigma_UV, add_dust=True):
+        """Initialize UV luminosity function calculator."""
+        self.z = z
+        
+        # Unpack and store UVHMR parameters
+        self.eps0 = uvhmr_params[0]
+        self.Mc = 10**uvhmr_params[1]  # Convert from log
+        self.a = uvhmr_params[2]
+        self.b = uvhmr_params[3]
+        
+        # Unpack and store satellite parameters
+        self.Mcut = 10**nsat_params[0]  # Convert from log
+        self.Msat = 10**nsat_params[1]  # Convert from log
+        self.asat = nsat_params[2]
+        
+        # Store other parameters
+        self.sigma_UV = sigma_UV
+        self.add_dust = add_dust
+        
+        # Cache
+        self._hmf = None
+        self._log10_mass = None
+    
+    @property
+    def uvhmr_params(self):
+        """Get UVHMR parameters in standard format."""
+        return [self.eps0, self.Mc, self.a, self.b]
+    
+    @property
+    def nsat_params(self):
+        """Get satellite parameters in log format."""
+        return [np.log10(self.Mcut), np.log10(self.Msat), self.asat]
+    
+    def _get_hmf(self):
+        """Get or compute halo mass function."""
+        if self._hmf is None or self._log10_mass is None:
+            self._log10_mass, self._hmf = get_halo_mass_function(
+                self.z, M_min=6, M_max=15, num_points=2048
+            )
+        return self._log10_mass, self._hmf
+    
+    def compute(self, MUV_arr):
+        """Compute UV luminosity function.
+        
+        Parameters
+        ----------
+        MUV_arr : array_like
+            Array of UV absolute magnitudes
+            
+        Returns
+        -------
+        phi : ndarray
+            Luminosity function Φ(M_UV) in Mpc^-3 mag^-1
+        """
+        return compute_luminosity_function(
+            MUV_arr, self.z,
+            [self.eps0, np.log10(self.Mc), self.a, self.b],
+            self.nsat_params,
+            self.sigma_UV,
+            self.add_dust
+        )
+    
+    def compute_bias(self, MUV_arr):
+        """Compute galaxy bias.
+        
+        Parameters
+        ----------
+        MUV_arr : array_like
+            Array of UV absolute magnitudes
+            
+        Returns
+        -------
+        bias : ndarray
+            Galaxy bias as function of M_UV
+        """
+        return compute_galaxy_bias(
+            MUV_arr, self.z,
+            [self.eps0, np.log10(self.Mc), self.a, self.b],
+            self.nsat_params,
+            self.sigma_UV,
+            self.add_dust
+        )
+    
+    def mean_halo_mass(self, MUV_thresh):
+        """Compute mean halo mass for galaxies brighter than threshold.
+        
+        Parameters
+        ----------
+        MUV_thresh : float
+            UV magnitude threshold
+            
+        Returns
+        -------
+        log10_Mh : float
+            Mean log10 halo mass
+        """
+        return compute_mean_halo_mass(
+            MUV_thresh, self.z,
+            [self.eps0, np.log10(self.Mc), self.a, self.b],
+            self.nsat_params,
+            self.sigma_UV,
+            self.add_dust
+        )
+    
+    def mean_bias(self, MUV_thresh):
+        """Compute mean galaxy bias for galaxies brighter than threshold.
+        
+        Parameters
+        ----------
+        MUV_thresh : float
+            UV magnitude threshold
+            
+        Returns
+        -------
+        bias : float
+            Mean galaxy bias
+        """
+        return compute_mean_bias(
+            MUV_thresh, self.z,
+            [self.eps0, np.log10(self.Mc), self.a, self.b],
+            self.nsat_params,
+            self.sigma_UV,
+            self.add_dust
+        )
+    
+    def update_parameters(self, **kwargs):
+        """Update model parameters.
+        
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter updates. Can include:
+            - eps0, a, b : float
+            - log_Mc : float (will be converted)
+            - log_Mcut, log_Msat : float (will be converted)
+            - asat : float
+            - sigma_UV : float
+            - z : float
+            - add_dust : bool
+        """
+        if 'eps0' in kwargs:
+            self.eps0 = kwargs['eps0']
+        if 'log_Mc' in kwargs:
+            self.Mc = 10**kwargs['log_Mc']
+        elif 'Mc' in kwargs:
+            self.Mc = kwargs['Mc']
+        if 'a' in kwargs:
+            self.a = kwargs['a']
+        if 'b' in kwargs:
+            self.b = kwargs['b']
+        if 'log_Mcut' in kwargs:
+            self.Mcut = 10**kwargs['log_Mcut']
+        elif 'Mcut' in kwargs:
+            self.Mcut = kwargs['Mcut']
+        if 'log_Msat' in kwargs:
+            self.Msat = 10**kwargs['log_Msat']
+        elif 'Msat' in kwargs:
+            self.Msat = kwargs['Msat']
+        if 'asat' in kwargs:
+            self.asat = kwargs['asat']
+        if 'sigma_UV' in kwargs:
+            self.sigma_UV = kwargs['sigma_UV']
+        if 'z' in kwargs:
+            self.z = kwargs['z']
+            # Clear cached HMF since redshift changed
+            self._hmf = None
+            self._log10_mass = None
+        if 'add_dust' in kwargs:
+            self.add_dust = kwargs['add_dust']
+    
+    def __repr__(self):
+        return (f"UVLuminosityFunction(z={self.z}, "
+                f"eps0={self.eps0:.3f}, Mc={self.Mc:.2e}, "
+                f"a={self.a:.2f}, b={self.b:.2f})")
+    
+    def __str__(self):
+        s = f"UV Luminosity Function Model at z={self.z}\n"
+        s += "="*50 + "\n"
+        s += "UVHMR Parameters:\n"
+        s += f"  eps0 = {self.eps0:.3f}\n"
+        s += f"  Mc = {self.Mc:.2e} M_sun\n"
+        s += f"  a = {self.a:.2f}\n"
+        s += f"  b = {self.b:.2f}\n"
+        s += "\nSatellite Parameters:\n"
+        s += f"  Mcut = {self.Mcut:.2e} M_sun\n"
+        s += f"  Msat = {self.Msat:.2e} M_sun\n"
+        s += f"  asat = {self.asat:.2f}\n"
+        s += "\nOther:\n"
+        s += f"  sigma_UV = {self.sigma_UV:.2f} mag\n"
+        s += f"  add_dust = {self.add_dust}\n"
+        s += "="*50
+        return s

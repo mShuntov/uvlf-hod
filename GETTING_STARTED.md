@@ -7,7 +7,7 @@ This guide will help you get started with the `uvlf-hod` package for modeling hi
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/uvlf-hod.git
+git clone https://github.com/mshuntov/uvlf-hod.git
 cd uvlf-hod
 ```
 

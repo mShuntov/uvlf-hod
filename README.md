@@ -27,7 +27,7 @@ pip install uvlf-hod
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/uvlf-hod.git
+git clone https://github.com/mshuntov/uvlf-hod.git
 cd uvlf-hod
 pip install -e .
 ```

@@ -185,12 +185,25 @@ Contributions are welcome! Please:
 If you use this package in your research, please cite:
 
 ```bibtex
-@software{uvlf_hod,
-  author = {Your Name},
-  title = {uvlf-hod: UV Luminosity Functions with HOD Models},
-  year = {2024},
-  url = {https://github.com/yourusername/uvlf-hod}
+@ARTICLE{2025A&A...699A.231S,
+       author = {{Shuntov}, Marko and {Oesch}, Pascal A. and {Toft}, Sune and {Meyer}, Romain A. and {Covelo-Paz}, Alba and {Paquereau}, Louise and {Bouwens}, Rychard and {Brammer}, Gabriel and {Gelli}, Viola and {Giovinazzo}, Emma and {Herard-Demanche}, Thomas and {Illingworth}, Garth D. and {Mason}, Charlotte and {Naidu}, Rohan P. and {Weibel}, Andrea and {Xiao}, Mengyuan},
+        title = "{Constraints on the early Universe star formation efficiency from galaxy clustering and halo modeling of H{\ensuremath{\alpha}} and [O III] emitters}",
+      journal = {\aap},
+     keywords = {galaxies: evolution, galaxies: high-redshift, galaxies: luminosity function, mass function, galaxies: statistics, Astrophysics of Galaxies},
+         year = 2025,
+        month = jul,
+       volume = {699},
+          eid = {A231},
+        pages = {A231},
+          doi = {10.1051/0004-6361/202554618},
+archivePrefix = {arXiv},
+       eprint = {2503.14280},
+ primaryClass = {astro-ph.GA},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2025A&A...699A.231S},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
+
+
 ```
 
 ## License
@@ -207,4 +220,4 @@ Based on methodology from:
 
 ## Contact
 
-For questions or issues, please open an issue on GitHub or contact [your email].
+For questions or issues, please open an issue on GitHub or contact marko.shuntov@nbu.ku.dk.

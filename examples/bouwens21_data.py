@@ -2,7 +2,7 @@
 Bouwens+2021 UV Luminosity Function compilation.
 
 Data from Bouwens et al. 2021 ApJ 912 111
-https://ui.adsabs.harvard.edu/abs/2021ApJ...912..111B
+https://ui.adsabs.harvard.edu/abs/2021AJ....162...47B/abstract
 """
 
 import numpy as np
@@ -37,9 +37,9 @@ bouwens21 = {
 
 # Effective redshifts for each bin
 redshift_centers = {
-    "z4": 4.3,
-    "z5": 5.4,
-    "z6": 6.0,
-    "z7": 7.3,
-    "z8": 8.0,
+    "z4": 4,
+    "z5": 5,
+    "z6": 6,
+    "z7": 7,
+    "z8": 8,
 }

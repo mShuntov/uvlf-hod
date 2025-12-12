@@ -17,9 +17,7 @@ from .__version__ import __version__
 # Main model classes (new unified interface)
 from .model import (
     UVHMRModel,
-    HODModel,
-    UVHaloMassRelation,  # Alias for backwards compatibility
-    UVLuminosityFunction,  # Alias for backwards compatibility
+    HODModel
 )
 
 # Cosmology

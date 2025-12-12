@@ -13,7 +13,7 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 - **Luminosity Functions**: Compute UV luminosity functions at high redshift
 - **Galaxy Bias**: Calculate galaxy clustering bias
 - **Dust Attenuation**: Self-consistent treatment following Bouwens+2013-14
-- **Fitted Parameters**: Defaults from Shuntov+2025, fitted to Bouwens+2021 data
+- **Fitted Parameters**: Defaults from Shuntov+2025
 - **Redshift Evolution**: Built-in parameter evolution with redshift
 
 ## Installation
@@ -196,7 +196,7 @@ HODModel (extends UVHMRModel)
 
 ## Default Parameters
 
-All defaults from **Shuntov+2025** (2025A&A...699A.231S), fitted to Bouwens+2021 at z~5.4:
+All defaults from **Shuntov+2025** (2025A&A...699A.231S) at z~5.4:
 
 ### UVHMR Parameters
 

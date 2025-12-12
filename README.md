@@ -196,7 +196,11 @@ HODModel (extends UVHMRModel)
 
 ## Default Parameters
 
+<<<<<<< HEAD
 All defaults from **Shuntov+2025** (2025A&A...699A.231S) z~5.4:
+=======
+All defaults from **Shuntov+2025** (2025A&A...699A.231S) at z~5.4:
+>>>>>>> 2c62ade405dc58526b295d4dfca7fd65cd02f497
 
 ### UVHMR Parameters
 

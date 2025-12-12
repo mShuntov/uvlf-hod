@@ -63,17 +63,17 @@ HODModel (full model)
 ```python
 from uvlf_hod import HODModel
 
-# Create a complete model
+# Create a complete model using fitted parameters from Shuntov+2025
 model = HODModel(
     z=6.0,           # Redshift
-    eps0=0.1,        # Star formation efficiency
-    Mc=10**11.5,     # Characteristic halo mass [M_sun]
-    a=0.6,           # Low-mass slope
-    b=0.35,          # High-mass slope
-    sigma_UV=0.35,   # UV magnitude scatter [mag]
-    Mcut=10**10,     # Satellite cutoff mass [M_sun]
-    Msat=10**12.5,   # Satellite normalization [M_sun]
-    asat=1.0         # Satellite power-law slope
+    eps0=0.19,       # Star formation efficiency
+    Mc=10**11.64,    # Characteristic halo mass [M_sun]
+    a=0.69,          # Low-mass slope (beta)
+    b=0.65,          # High-mass slope (gamma)
+    sigma_UV=0.69,   # UV magnitude scatter [mag]
+    Mcut=10**9.57,   # Satellite cutoff mass [M_sun]
+    Msat=10**12.65,  # Satellite normalization [M_sun]
+    asat=0.85        # Satellite power-law slope
 )
 
 print(model)
@@ -102,40 +102,48 @@ plt.show()
 
 ### 3. Understanding the Parameters
 
+The default parameters are taken at z~5.4 from Shuntov+2025.
+
 #### UVHMR Parameters (control star formation)
 
 ```python
-# eps0: Star formation efficiency peak
+# eps0: Star formation efficiency peak (default: 0.19)
 # Higher eps0 → more star formation → brighter galaxies
-model.update_parameters(eps0=0.15)
 
-# Mc: Characteristic halo mass where efficiency peaks
-# Typical: 10^11 - 10^12 M_sun
-model.update_parameters(Mc=10**12)
+# Mc: Characteristic halo mass where efficiency peaks (default: 10^11.64 M_sun)
 
-# a, b: Shape of efficiency curve
+# a, b: Shape of efficiency curve (defaults: a=0.69, b=0.65)
 # a controls low-mass slope, b controls high-mass slope
-model.update_parameters(a=0.7, b=0.3)
 ```
 
 #### HOD Parameters (control occupation)
 
 ```python
-# sigma_UV: Scatter in M_UV at fixed halo mass
-# Larger scatter → more spread in the relation
-model.update_parameters(sigma_UV=0.4)
+# sigma_UV: Scatter in M_UV at fixed halo mass (default: 0.69 mag)
 
-# Mcut: Minimum mass for satellite galaxies
+# Mcut: Minimum mass for satellite galaxies (default: 10^9.57 M_sun)
 # Only halos with M > Mcut can host satellites
-model.update_parameters(Mcut=10**10.5)
 
-# Msat: Normalization for satellite occupation
+# Msat: Normalization for satellite occupation (default: 10^12.65 M_sun)
 # Controls how many satellites in massive halos
-model.update_parameters(Msat=10**12)
 
-# asat: Power-law slope for satellites
-# Steeper slope → more satellites in massive halos
-model.update_parameters(asat=1.2)
+# asat: Power-law slope for satellites (default: 0.85)
+```
+
+#### Using Defaults from Config
+
+```python
+from uvlf_hod.config import DEFAULT_HOD_PARAMS
+
+# All defaults from Shuntov+2025
+print(f"eps0 = {DEFAULT_HOD_PARAMS['eps0']}")           # 0.19
+print(f"log(Mc) = {DEFAULT_HOD_PARAMS['logMc']}")       # 11.64
+print(f"a = {DEFAULT_HOD_PARAMS['a']}")                 # 0.69
+print(f"b = {DEFAULT_HOD_PARAMS['b']}")                 # 0.65
+print(f"sigma_UV = {DEFAULT_HOD_PARAMS['sigma_UV']}")   # 0.69
+print(f"log(Mcut) = {DEFAULT_HOD_PARAMS['Mcut']}")      # 9.57
+print(f"log(Msat) = {DEFAULT_HOD_PARAMS['Msat']}")      # 12.65
+print(f"asat = {DEFAULT_HOD_PARAMS['asat']}")           # 0.85
 ```
 
 ### 4. Using UVHMR Methods
@@ -155,10 +163,6 @@ print(f"M_UV = {MUV:.2f}")
 # Inverse: halo mass for a UV magnitude
 Mh_recovered = model.Mhalo(MUV)
 print(f"Recovered: {Mh_recovered:.2e} M_sun")
-
-# Star formation efficiency
-epsilon = model.star_formation_efficiency(Mh)
-print(f"ε = {epsilon:.3f}")
 ```
 
 ### 5. Using HOD Methods
@@ -172,7 +176,7 @@ N_cen = model.Ncen(Mh_array, MUV_thresh)  # Central galaxies
 N_sat = model.Nsat(Mh_array, MUV_thresh)  # Satellite galaxies
 N_tot = model.Ngal(Mh_array, MUV_thresh)  # Total galaxies
 
-# Plot occupation functions
+# Plot
 plt.figure(figsize=(8, 6))
 plt.plot(np.log10(Mh_array), N_cen, label='Central')
 plt.plot(np.log10(Mh_array), N_sat, label='Satellite')
@@ -193,7 +197,6 @@ bias = model.galaxy_bias(MUV)
 plt.plot(MUV, bias, linewidth=2)
 plt.xlabel('$M_{\\mathrm{UV}}$')
 plt.ylabel('Galaxy Bias $b_g$')
-plt.title('Galaxy Clustering Bias')
 plt.grid(True, alpha=0.3)
 plt.show()
 ```
@@ -212,78 +215,120 @@ print(f"  Mean halo mass: {10**mean_mass:.2e} M_sun")
 print(f"  Mean bias: {mean_bias:.2f}")
 ```
 
-### 8. Updating Parameters
-
-```python
-# Update one or more parameters
-model.update_parameters(z=7.0, eps0=0.15)
-
-# The model is ready to use with new parameters
-phi_new = model.luminosity_function(MUV)
-
-# Reset if needed
-model.update_parameters(z=6.0, eps0=0.1)
-```
-
 ## Common Workflows
 
 ### Workflow 1: Compare Model to Observations
 
 ```python
-import numpy as np
-import matplotlib.pyplot as plt
-from uvlf_hod import HODModel
+from bouwens21_data import bouwens21, redshift_centers
 
-# Observational data (example)
-MUV_obs = np.array([-21.5, -20.5, -19.5, -18.5])
-phi_obs = np.array([1e-5, 5e-5, 2e-4, 8e-4])
-phi_err = phi_obs * 0.3
+# Load Bouwens+2021 data
+obs = bouwens21['z6']
+z_obs = redshift_centers['z6']
 
 # Create model
 model = HODModel(
-    z=6.0, eps0=0.1, Mc=10**11.5, a=0.6, b=0.35,
-    sigma_UV=0.35, Mcut=10**10, Msat=10**12.5, asat=1.0
+    z=z_obs, eps0=0.19, Mc=10**11.64, a=0.69, b=0.65,
+    sigma_UV=0.69, Mcut=10**9.57, Msat=10**12.65, asat=0.85
 )
 
-# Compute model predictions
-MUV_model = np.linspace(-22, -17, 30)
+# Compute model
+MUV_model = np.linspace(-23, -15, 50)
 phi_model = model.luminosity_function(MUV_model)
 
 # Plot comparison
-fig, ax = plt.subplots(figsize=(8, 6))
-ax.errorbar(MUV_obs, phi_obs, yerr=phi_err, fmt='o', 
-            label='Observations', capsize=5, markersize=8)
-ax.semilogy(MUV_model, phi_model, '-', linewidth=2, label='Model')
+fig, ax = plt.subplots(figsize=(10, 7))
+ax.errorbar(obs['M_AB'], obs['Fi_k'], yerr=obs['Fi_k_error'],
+            fmt='o', markersize=8, capsize=4, label='Bouwens+2021')
+ax.semilogy(MUV_model, phi_model, 'r-', linewidth=2.5, label='Model')
 ax.set_xlabel('$M_{\\mathrm{UV}}$', fontsize=14)
 ax.set_ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]', fontsize=14)
 ax.legend(fontsize=12)
 ax.grid(True, alpha=0.3)
-plt.tight_layout()
+plt.title(f'z = {z_obs}', fontsize=16)
 plt.show()
 ```
 
-### Workflow 2: Parameter Exploration
+### Workflow 2: Redshift Evolution of Parameters
 
 ```python
-# Explore effect of varying eps0
-eps0_values = [0.05, 0.1, 0.15, 0.2]
-colors = plt.cm.viridis(np.linspace(0, 1, len(eps0_values)))
+from uvlf_hod.models.parametrization import eps0_fz, Mc_fz, a_fz, b_fz
+from uvlf_hod.config import DEFAULT_REDSHIFT_EVOLUTION
 
-fig, ax = plt.subplots(figsize=(10, 6))
+# Define redshift range
+z_array = np.linspace(4, 8, 20)
 
-for eps0, color in zip(eps0_values, colors):
-    model_var = HODModel(
-        z=6.0, eps0=eps0, Mc=10**11.5, a=0.6, b=0.35,
-        sigma_UV=0.35, Mcut=10**10, Msat=10**12.5, asat=1.0
-    )
-    phi = model_var.luminosity_function(MUV_model)
-    ax.semilogy(MUV_model, phi, linewidth=2.5, color=color,
-                label=f'$\\epsilon_0={eps0}$')
+# Get evolved parameters using fitted evolution
+eps0_z = eps0_fz(
+    z_array,
+    deps_dz=DEFAULT_REDSHIFT_EVOLUTION['d_eps0_dz'],  # 0.02
+    eps_off=DEFAULT_REDSHIFT_EVOLUTION['C_eps0']      # 0.09
+)
+
+Mc_z = 10**Mc_fz(
+    z_array,
+    dMc_dz=DEFAULT_REDSHIFT_EVOLUTION['d_logMc_dz'],  # 0.14
+    Mc_off=DEFAULT_REDSHIFT_EVOLUTION['C_logMc']       # 10.86
+)
+
+a_z = a_fz(
+    z_array,
+    da_dz=DEFAULT_REDSHIFT_EVOLUTION['d_a_dz'],        # 0.01
+    a_off=DEFAULT_REDSHIFT_EVOLUTION['C_a']            # 0.62
+)
+
+b_z = b_fz(
+    z_array,
+    db_dz=DEFAULT_REDSHIFT_EVOLUTION['d_b_dz'],        # -0.06
+    b_off=DEFAULT_REDSHIFT_EVOLUTION['C_b']            # 0.97
+)
+
+# Plot parameter evolution
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+axes[0, 0].plot(z_array, eps0_z, 'b-', linewidth=2)
+axes[0, 0].set_ylabel('$\\epsilon_0$', fontsize=14)
+axes[0, 0].set_xlabel('Redshift', fontsize=12)
+axes[0, 0].grid(True, alpha=0.3)
+
+axes[0, 1].plot(z_array, np.log10(Mc_z), 'r-', linewidth=2)
+axes[0, 1].set_ylabel('$\\log_{10}(M_c / M_\\odot)$', fontsize=14)
+axes[0, 1].set_xlabel('Redshift', fontsize=12)
+axes[0, 1].grid(True, alpha=0.3)
+
+axes[1, 0].plot(z_array, a_z, 'g-', linewidth=2)
+axes[1, 0].set_ylabel('$a$ (low-mass slope)', fontsize=14)
+axes[1, 0].set_xlabel('Redshift', fontsize=12)
+axes[1, 0].grid(True, alpha=0.3)
+
+axes[1, 1].plot(z_array, b_z, 'm-', linewidth=2)
+axes[1, 1].set_ylabel('$b$ (high-mass slope)', fontsize=14)
+axes[1, 1].set_xlabel('Redshift', fontsize=12)
+axes[1, 1].grid(True, alpha=0.3)
+
+plt.suptitle('Parameter Evolution with Redshift', fontsize=16)
+plt.tight_layout()
+plt.show()
+
+# Create models with evolved parameters
+colors = plt.cm.viridis(np.linspace(0, 1, len(z_array)))
+fig, ax = plt.subplots(figsize=(10, 7))
+
+for i, (z, eps0, Mc, a, b, color) in enumerate(zip(z_array, eps0_z, Mc_z, a_z, b_z, colors)):
+    if i % 4 == 0:  # Plot every 4th redshift
+        model = HODModel(
+            z=z, eps0=eps0, Mc=Mc, a=a, b=b,
+            sigma_UV=0.69, Mcut=10**9.57, Msat=10**12.65, asat=0.85
+        )
+        MUV = np.linspace(-22, -16, 30)
+        phi = model.luminosity_function(MUV)
+        ax.semilogy(MUV, phi, color=color, linewidth=2, label=f'z={z:.1f}')
 
 ax.set_xlabel('$M_{\\mathrm{UV}}$', fontsize=14)
 ax.set_ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]', fontsize=14)
-ax.legend(fontsize=12)
+ax.legend(fontsize=11)
 ax.grid(True, alpha=0.3)
+plt.title('Luminosity Function Evolution', fontsize=16)
 plt.tight_layout()
 plt.show()
 ```
@@ -298,9 +343,11 @@ fig, ax = plt.subplots(figsize=(10, 6))
 
 # Create one model and update redshift
 model = HODModel(
-    z=5.0, eps0=0.1, Mc=10**11.5, a=0.6, b=0.35,
-    sigma_UV=0.35, Mcut=10**10, Msat=10**12.5, asat=1.0
+    z=5.0, eps0=0.19, Mc=10**11.64, a=0.69, b=0.65,
+    sigma_UV=0.69, Mcut=10**9.57, Msat=10**12.65, asat=0.85
 )
+
+MUV_model = np.linspace(-22, -16, 30)
 
 for z_val, color in zip(redshifts, colors):
     model.update_parameters(z=z_val)
@@ -316,88 +363,6 @@ plt.tight_layout()
 plt.show()
 ```
 
-### Workflow 4: Comprehensive Analysis
-
-```python
-# Create model
-model = HODModel(
-    z=6.0, eps0=0.1, Mc=10**11.5, a=0.6, b=0.35,
-    sigma_UV=0.35, Mcut=10**10, Msat=10**12.5, asat=1.0
-)
-
-# Compute all quantities
-MUV = np.linspace(-22, -16, 25)
-phi = model.luminosity_function(MUV)
-bias = model.galaxy_bias(MUV)
-
-# Mean properties
-mean_mass_bright = model.mean_halo_mass(-20)
-mean_mass_faint = model.mean_halo_mass(-17)
-
-# Create comprehensive plot
-fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-
-# Luminosity function
-ax1.semilogy(MUV, phi, 'b-', linewidth=2)
-ax1.set_xlabel('$M_{\\mathrm{UV}}$')
-ax1.set_ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]')
-ax1.set_title('Luminosity Function')
-ax1.grid(True, alpha=0.3)
-
-# Galaxy bias
-ax2.plot(MUV, bias, 'r-', linewidth=2)
-ax2.set_xlabel('$M_{\\mathrm{UV}}$')
-ax2.set_ylabel('$b_g$')
-ax2.set_title('Galaxy Bias')
-ax2.grid(True, alpha=0.3)
-
-# UVHMR
-Mh = np.logspace(9, 13, 100)
-MUV_hmr = model.MUV(Mh)
-ax3.plot(np.log10(Mh), MUV_hmr, 'g-', linewidth=2)
-ax3.set_xlabel('$\\log_{10}(M_h / M_\\odot)$')
-ax3.set_ylabel('$M_{\\mathrm{UV}}$')
-ax3.invert_yaxis()
-ax3.set_title('UV-Halo Mass Relation')
-ax3.grid(True, alpha=0.3)
-
-# Occupation
-N_cen = model.Ncen(Mh, -18)
-N_sat = model.Nsat(Mh, -18)
-ax4.plot(np.log10(Mh), N_cen, label='Central', linewidth=2)
-ax4.plot(np.log10(Mh), N_sat, label='Satellite', linewidth=2)
-ax4.set_xlabel('$\\log_{10}(M_h / M_\\odot)$')
-ax4.set_ylabel('$\\langle N \\rangle$')
-ax4.set_title('Occupation (M_UV < -18)')
-ax4.legend()
-ax4.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-
-print("\nResults Summary:")
-print(f"  Bright galaxies (M_UV < -20): <M_h> = {10**mean_mass_bright:.2e} M_sun")
-print(f"  Faint galaxies (M_UV < -17): <M_h> = {10**mean_mass_faint:.2e} M_sun")
-```
-
-## Advanced Topics
-
-### Using Only UVHMR (No HOD)
-
-If you only need UV-halo mass relations without occupation distributions:
-
-```python
-from uvlf_hod import UVHMRModel
-
-uvhmr = UVHMRModel(z=6.0, eps0=0.1, Mc=1e12, a=0.6, b=0.35)
-
-# UVHMR methods available
-MUV = uvhmr.MUV(1e11)
-sfr = uvhmr.sfr(1e11)
-
-# HOD methods NOT available (raises error)
-# uvhmr.luminosity_function(MUV)  # ❌ AttributeError
-```
 
 ### Custom Cosmology
 
@@ -406,25 +371,6 @@ from uvlf_hod.config import CosmologyConfig
 
 # Create custom cosmology
 custom_cosmo = CosmologyConfig(H0=67.0, Om0=0.32, Ob0=0.05)
-
-# Models will use this cosmology
-```
-
-### Redshift Evolution of Parameters
-
-```python
-from uvlf_hod.models.parametrization import eps0_fz
-
-# Define evolution
-z_array = np.linspace(4, 10, 20)
-eps0_values = eps0_fz(z_array, deps_dz=0.01, eps_off=0.05)
-
-# Create models at each redshift
-models = [
-    HODModel(z=z, eps0=eps0, Mc=10**11.5, a=0.6, b=0.35,
-             sigma_UV=0.35, Mcut=10**10, Msat=10**12.5, asat=1.0)
-    for z, eps0 in zip(z_array, eps0_values)
-]
 ```
 
 ## Troubleshooting
@@ -438,11 +384,11 @@ pip install -r requirements.txt
 
 ### Issue: Slow calculations
 
-**Solution**: The first calculation creates the HMF cache. Subsequent calculations are much faster. Reduce `num_points` in `get_halo_mass_function` for faster (but less accurate) results.
+**Solution**: The first calculation creates the HMF cache. Subsequent calculations are much faster.
 
 ### Issue: NaN values in results
 
-**Solution**: Check parameter ranges. Very extreme values can cause numerical issues. Ensure masses are reasonable (10^9 - 10^14 M_sun).
+**Solution**: Check parameter ranges. Very extreme values can cause numerical issues.
 
 ## Next Steps
 
@@ -454,4 +400,5 @@ pip install -r requirements.txt
 
 - Open an issue on [GitHub](https://github.com/mshuntov/uvlf-hod/issues)
 - Check the examples directory
+- Read the paper: Shuntov et al. 2025, A&A 699 A231
 - Contact: marko.shuntov@nbi.ku.dk

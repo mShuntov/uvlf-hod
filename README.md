@@ -7,14 +7,14 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 
 ## Features
 
-- **Unified Model Architecture**: Single class interface for all calculations
+- **Simple API**: Only redshift required, scientifically validated defaults
 - **UV-Halo Mass Relation (UVHMR)**: Connect halo mass to UV luminosity through star formation
 - **Halo Occupation Distribution**: Model central and satellite galaxy populations
 - **Luminosity Functions**: Compute UV luminosity functions at high redshift
 - **Galaxy Bias**: Calculate galaxy clustering bias
 - **Dust Attenuation**: Self-consistent treatment following Bouwens+2013-14
-- **Flexible Parametrization**: Redshift-dependent model parameters
-- **Modern Python**: Clean API with class inheritance and comprehensive documentation
+- **Fitted Parameters**: Defaults from Shuntov+2025, fitted to Bouwens+2021 data
+- **Redshift Evolution**: Built-in parameter evolution with redshift
 
 ## Installation
 
@@ -42,25 +42,16 @@ pip install -e .
 
 ## Quick Start
 
-### Basic UV Luminosity Function
+### Minimal Example
 
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
 from uvlf_hod import HODModel
 
-# Create a unified model with all parameters
-model = HODModel(
-    z=6.0,           # Redshift
-    eps0=0.1,        # Star formation efficiency
-    Mc=10**11.5,     # Characteristic halo mass [M_sun]
-    a=0.6,           # Low-mass slope
-    b=0.35,          # High-mass slope
-    sigma_UV=0.35,   # UV magnitude scatter
-    Mcut=10**10,     # Satellite cutoff mass [M_sun]
-    Msat=10**12.5,   # Satellite normalization mass [M_sun]
-    asat=1.0         # Satellite power-law slope
-)
+# Create model - only redshift required!
+# Uses fitted defaults from Shuntov+2025
+model = HODModel(z=6.0)
 
 # Compute luminosity function
 MUV = np.linspace(-22, -16, 20)
@@ -73,10 +64,10 @@ plt.ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]')
 plt.show()
 ```
 
-### Galaxy Bias Calculation
+### Galaxy Bias
 
 ```python
-# Use the same model to compute bias
+# Compute bias with the same model
 bias = model.galaxy_bias(MUV)
 
 plt.plot(MUV, bias)
@@ -88,7 +79,7 @@ plt.show()
 ### UV-Halo Mass Relation
 
 ```python
-# UVHMR methods are inherited
+# UVHMR methods are built-in
 Mh = 1e11  # M_sun
 MUV = model.MUV(Mh)
 sfr = model.sfr(Mh)
@@ -101,28 +92,65 @@ print(f"  SFR = {sfr:.1f} M_sun/yr")
 Mh_recovered = model.Mhalo(MUV)
 ```
 
-### Mean Properties
+### Override Specific Parameters
 
 ```python
-# Compute mean properties for galaxies above a threshold
-MUV_thresh = -20
+# Use defaults but change star formation efficiency
+model = HODModel(z=6.0, eps0=0.25)
 
-mean_mass = model.mean_halo_mass(MUV_thresh)
-mean_bias = model.mean_bias(MUV_thresh)
-
-print(f"Galaxies brighter than {MUV_thresh}:")
-print(f"  Mean halo mass: {10**mean_mass:.2e} M_sun")
-print(f"  Mean bias: {mean_bias:.2f}")
+# Override multiple parameters
+model = HODModel(z=6.0, eps0=0.2, Mc=10**12, sigma_UV=0.5)
 ```
 
-### Updating Parameters
+### Redshift Evolution
 
 ```python
-# Dynamically update parameters
-model.update_parameters(z=7.0, eps0=0.15)
+from uvlf_hod.models.parametrization import eps0_fz, Mc_fz
+from uvlf_hod.config import DEFAULT_REDSHIFT_EVOLUTION
 
-# Recompute with new parameters
-phi_new = model.luminosity_function(MUV)
+# Parameters evolve with redshift using fitted evolution
+z_array = np.linspace(4, 8, 20)
+
+# Get evolved parameters
+eps0_z = eps0_fz(
+    z_array, 
+    deps_dz=DEFAULT_REDSHIFT_EVOLUTION['d_eps0_dz'],
+    eps_off=DEFAULT_REDSHIFT_EVOLUTION['C_eps0']
+)
+
+Mc_z = 10**Mc_fz(
+    z_array,
+    dMc_dz=DEFAULT_REDSHIFT_EVOLUTION['d_logMc_dz'],
+    Mc_off=DEFAULT_REDSHIFT_EVOLUTION['C_logMc']
+)
+
+# Create models with evolved parameters
+for z, eps0, Mc in zip(z_array, eps0_z, Mc_z):
+    model = HODModel(z=z, eps0=eps0, Mc=Mc)
+    phi = model.luminosity_function(MUV)
+```
+
+### Compare to Observations
+
+```python
+from bouwens21_data import bouwens21, redshift_centers
+
+# Load data
+obs = bouwens21['z6']
+z_obs = redshift_centers['z6']
+
+# Create model with defaults (fitted to this data!)
+model = HODModel(z=z_obs)
+
+# Compute and compare
+MUV_model = np.linspace(-23, -15, 50)
+phi_model = model.luminosity_function(MUV_model)
+
+plt.errorbar(obs['M_AB'], obs['Fi_k'], yerr=obs['Fi_k_error'],
+            fmt='o', label='Bouwens+2021')
+plt.semilogy(MUV_model, phi_model, '-', label='Model')
+plt.legend()
+plt.show()
 ```
 
 ## Documentation
@@ -134,7 +162,7 @@ Full documentation is available at [link to docs].
 ```
 uvlf_hod/
 ├── __init__.py          # Public API
-├── config.py            # Configuration and constants
+├── config.py            # Configuration and defaults
 ├── cosmology.py         # Halo mass function and bias
 ├── model.py             # Unified UVHMR and HOD models
 ├── luminosity.py        # UV luminosity and dust
@@ -144,27 +172,55 @@ uvlf_hod/
 
 ### Key Classes
 
-- **`HODModel`**: Main class combining UVHMR + HOD (recommended for most users)
+- **`HODModel`**: Main class for all galaxy population modeling (recommended)
 - **`UVHMRModel`**: Base class for UV-halo mass relations only
 - **`HaloMassFunction`**: Halo mass function with caching
 - **`CosmologyConfig`**: Cosmology configuration
 
 ## Model Architecture
 
-The package uses a clean inheritance hierarchy:
+Clean, simple class hierarchy:
 
 ```
 UVHMRModel (base class)
 ├── Handles UV-halo mass relations
 ├── Methods: sfr(), MUV(), Mhalo()
-└── Parameters: z, eps0, Mc, a, b
+└── Parameters: z (required), eps0, Mc, a, b (optional)
 
 HODModel (extends UVHMRModel)
 ├── Inherits all UVHMR methods
 ├── Adds occupation distributions
-├── Methods: Ncen(), Nsat(), luminosity_function(), galaxy_bias()
-└── Additional parameters: sigma_UV, Mcut, Msat, asat
+├── Methods: luminosity_function(), galaxy_bias(), Ncen(), Nsat()
+└── Additional parameters: sigma_UV, Mcut, Msat, asat (optional)
 ```
+
+## Default Parameters
+
+All defaults from **Shuntov+2025** (2025A&A...699A.231S), fitted to Bouwens+2021 at z~5.4:
+
+### UVHMR Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `eps0` | 0.19 | Star formation efficiency |
+| `Mc` | 10^11.64 M_☉ | Characteristic halo mass |
+| `a` | 0.69 | Low-mass slope |
+| `b` | 0.65 | High-mass slope |
+
+### HOD Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sigma_UV` | 0.69 mag | UV magnitude scatter |
+| `Mcut` | 10^9.57 M_☉ | Satellite cutoff mass |
+| `Msat` | 10^12.65 M_☉ | Satellite normalization |
+| `asat` | 0.85 | Satellite power-law slope |
+
+### Redshift Evolution
+
+All parameters evolve as: `param(z) = d_param/dz × z + C_param`
+
+Evolution parameters available in `DEFAULT_REDSHIFT_EVOLUTION`.
 
 ## Examples
 
@@ -172,41 +228,7 @@ See the `examples/` directory for detailed examples:
 
 - `basic_usage.ipynb`: Interactive Jupyter notebook with complete workflow
 - `unified_model_example.py`: Comprehensive Python script
-- `parameter_exploration.py`: Parameter sensitivity analysis
-- `multi_redshift.py`: Redshift evolution studies
-
-## Physics Background
-
-### UV-Halo Mass Relation
-
-The package connects halo mass to UV luminosity through:
-
-1. **Star Formation**: SFR = ε(M_h) × f_b × dM_h/dt
-2. **UV Luminosity**: L_UV = SFR / c_UV
-3. **Dust Attenuation**: Self-consistent treatment using UV slope β
-
-### HOD Model
-
-Galaxy occupation follows:
-
-- **Centrals**: N_cen(M_h | M_UV) via scatter around mean UVHMR
-- **Satellites**: N_sat(M_h | M_UV) with cutoff mass and power-law
-
-### Key Parameters
-
-#### UVHMR Parameters
-
-- **eps0**: Star formation efficiency normalization (typical: 0.05-0.2)
-- **Mc**: Characteristic halo mass (typical: 10^11 - 10^12 M_sun)
-- **a**: Low-mass slope (typical: 0.4-0.8)
-- **b**: High-mass slope (typical: 0.2-0.5)
-
-#### HOD Parameters
-
-- **sigma_UV**: UV magnitude scatter (typical: 0.2-0.5 mag)
-- **Mcut**: Cutoff mass for satellites (typical: 10^9 - 10^11 M_sun)
-- **Msat**: Satellite normalization mass (typical: 10^11 - 10^13 M_sun)
-- **asat**: Satellite power-law slope (typical: 0.8-1.2)
+- `bouwens21_data.py`: Observational data compilation
 
 ## Testing
 
@@ -258,6 +280,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 Based on methodology from:
+- Shuntov et al. 2025, A&A 699 A321
 - Sabti et al. 2022
 - Muñoz et al. 2023
 - Bouwens et al. 2013, 2014

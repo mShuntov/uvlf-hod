@@ -25,14 +25,14 @@ class UVHMRModel:
     ----------
     z : float
         Redshift
-    eps0 : float
-        Star formation efficiency normalization
-    Mc : float
-        Characteristic halo mass in M_sun
-    a : float
-        Low-mass power-law slope
-    b : float
-        High-mass power-law slope
+    eps0 : float, optional
+        Star formation efficiency normalization. Default from config.
+    Mc : float, optional
+        Characteristic halo mass in M_sun. Default from config.
+    a : float, optional
+        Low-mass power-law slope. Default from config.
+    b : float, optional
+        High-mass power-law slope. Default from config.
     add_dust : bool, optional
         Whether to include dust attenuation. Default is True.
         
@@ -42,15 +42,25 @@ class UVHMRModel:
         Model parameters
     add_dust : bool
         Whether dust is included
+        
+    Examples
+    --------
+    >>> # Use all defaults (fitted to Bouwens+2021)
+    >>> model = UVHMRModel(z=6.0)
+    >>> 
+    >>> # Override specific parameters
+    >>> model = UVHMRModel(z=6.0, eps0=0.2, Mc=10**12)
     """
     
-    def __init__(self, z, eps0, Mc, a, b, add_dust=True):
+    def __init__(self, z, eps0=None, Mc=None, a=None, b=None, add_dust=True):
         """Initialize UVHMR model."""
+        from .config import DEFAULT_HOD_PARAMS
+        
         self.z = z
-        self.eps0 = eps0
-        self.Mc = Mc
-        self.a = a
-        self.b = b
+        self.eps0 = eps0 if eps0 is not None else DEFAULT_HOD_PARAMS['eps0']
+        self.Mc = Mc if Mc is not None else 10**DEFAULT_HOD_PARAMS['logMc']
+        self.a = a if a is not None else DEFAULT_HOD_PARAMS['a']
+        self.b = b if b is not None else DEFAULT_HOD_PARAMS['b']
         self.add_dust = add_dust
     
     def star_formation_efficiency(self, Mh):
@@ -179,22 +189,22 @@ class HODModel(UVHMRModel):
     ----------
     z : float
         Redshift
-    eps0 : float
-        Star formation efficiency normalization
-    Mc : float
-        Characteristic halo mass in M_sun
-    a : float
-        Low-mass power-law slope
-    b : float
-        High-mass power-law slope
-    sigma_UV : float
-        UV magnitude scatter
-    Mcut : float
-        Satellite cutoff mass in M_sun
-    Msat : float
-        Satellite normalization mass in M_sun
-    asat : float
-        Satellite power-law slope
+    eps0 : float, optional
+        Star formation efficiency normalization. Default from config.
+    Mc : float, optional
+        Characteristic halo mass in M_sun. Default from config.
+    a : float, optional
+        Low-mass power-law slope. Default from config.
+    b : float, optional
+        High-mass power-law slope. Default from config.
+    sigma_UV : float, optional
+        UV magnitude scatter. Default from config.
+    Mcut : float, optional
+        Satellite cutoff mass in M_sun. Default from config.
+    Msat : float, optional
+        Satellite normalization mass in M_sun. Default from config.
+    asat : float, optional
+        Satellite power-law slope. Default from config.
     add_dust : bool, optional
         Whether to include dust attenuation. Default is True.
         
@@ -202,16 +212,35 @@ class HODModel(UVHMRModel):
     ----------
     sigma_UV, Mcut, Msat, asat : float
         HOD parameters
+        
+    Examples
+    --------
+    >>> # Use all defaults (fitted to Bouwens+2021 at z~5.4)
+    >>> model = HODModel(z=6.0)
+    >>> 
+    >>> # Override specific parameters
+    >>> model = HODModel(z=6.0, eps0=0.2, sigma_UV=0.5)
+    >>> 
+    >>> # Compute luminosity function
+    >>> import numpy as np
+    >>> MUV = np.linspace(-22, -16, 20)
+    >>> phi = model.luminosity_function(MUV)
     """
     
-    def __init__(self, z, eps0, Mc, a, b, sigma_UV, Mcut, Msat, asat, 
+    def __init__(self, z, eps0=None, Mc=None, a=None, b=None, 
+                 sigma_UV=None, Mcut=None, Msat=None, asat=None, 
                  add_dust=True):
         """Initialize HOD model."""
+        from .config import DEFAULT_HOD_PARAMS
+        
+        # Initialize parent class with defaults
         super().__init__(z, eps0, Mc, a, b, add_dust)
-        self.sigma_UV = sigma_UV
-        self.Mcut = Mcut
-        self.Msat = Msat
-        self.asat = asat
+        
+        # Set HOD parameters with defaults
+        self.sigma_UV = sigma_UV if sigma_UV is not None else DEFAULT_HOD_PARAMS['sigma_UV']
+        self.Mcut = Mcut if Mcut is not None else 10**DEFAULT_HOD_PARAMS['Mcut']
+        self.Msat = Msat if Msat is not None else 10**DEFAULT_HOD_PARAMS['Msat']
+        self.asat = asat if asat is not None else DEFAULT_HOD_PARAMS['asat']
         
         # Cache for HMF
         self._hmf_cache = {}
@@ -468,6 +497,3 @@ class HODModel(UVHMRModel):
         s += f"  add_dust = {self.add_dust}\n"
         s += "="*50
         return s
-
-
-

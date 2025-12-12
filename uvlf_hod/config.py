@@ -23,21 +23,43 @@ DEFAULT_COLOSSUS_PARAMS = {
     'ns': 1.0,
 }
 
-# Default HOD parameters
+# Default HOD parameters (from fits at z~5.4)
+# Based on Shuntov et al. 2025 2025A&A...699A.231S - see Table with posterior medians
 DEFAULT_HOD_PARAMS = {
-    'z': 5.0,
+    'z': 5.4,
     'MUV_thresh1': -16.0,
     'MUV_thresh2': 0.0,
-    'eps0': 0.1,
-    'logMc': 12.0,
-    'alpha': 0.6,
-    'beta': 0.35,
-    'sigma_UV': 0.35,
-    'Mcut': 8.0,
-    'Msat': 12.0,
+    'eps0': 0.19,        # Star formation efficiency
+    'logMc': 11.64,      # log10(Mc/Msun) - characteristic mass
+    'a': 0.69,           # Low-mass slope (beta in paper)
+    'b': 0.65,           # High-mass slope (gamma in paper)
+    'sigma_UV': 0.69,    # UV magnitude scatter
+    'Mcut': 9.57,        # log10(Mcut/Msun) - satellite cutoff
+    'Msat': 12.65,       # log10(Msat/Msun) - satellite normalization
     'M_min': 9.0,
-    'asat': 1.0,
+    'asat': 0.85,        # Satellite power-law slope (alpha_sat in paper)
     'add_dust': True,
+}
+
+# Redshift evolution parameters (linear parametrization)
+# param(z) = d_param_dz * z + C_param
+DEFAULT_REDSHIFT_EVOLUTION = {
+    'd_eps0_dz': 0.02,
+    'C_eps0': 0.09,
+    'd_logMc_dz': 0.14,
+    'C_logMc': 10.86,
+    'd_a_dz': 0.01,      # beta in paper
+    'C_a': 0.62,
+    'd_b_dz': -0.06,     # gamma in paper
+    'C_b': 0.97,
+    'd_sigmaUV_dz': -0.03,
+    'C_sigmaUV': 0.74,
+    'd_Mcut_dz': 0.84,
+    'C_Mcut': 5.06,
+    'd_Msat_dz': 0.06,
+    'C_Msat': 12.38,
+    'd_asat_dz': 0.04,
+    'C_asat': 0.56,
 }
 
 # Beta-magnitude relation parameters (Bouwens 2013-14)

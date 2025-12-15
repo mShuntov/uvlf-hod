@@ -2,7 +2,7 @@
 
 import pytest
 import numpy as np
-from uvlf_hod.core import (
+from halogal.core import (
     star_formation_efficiency,
     halo_accretion_rate,
     sfr_from_halo_mass,

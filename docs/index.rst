@@ -1,10 +1,10 @@
-.. uvlf-hod documentation master file, created by
+.. halogal documentation master file, created by
    sphinx-quickstart on Thu Dec 11 23:38:03 2025.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-uvlf-hod Documentation
-======================
+halogal Documentation
+=====================
 
 .. toctree::
    :maxdepth: 2
@@ -16,13 +16,13 @@ uvlf-hod Documentation
 API Reference
 =============
 
-.. automodule:: uvlf_hod.model
+.. automodule:: halogal.model
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: uvlf_hod.cosmology
+.. automodule:: halogal.cosmology
    :members:
 
-.. automodule:: uvlf_hod.luminosity
+.. automodule:: halogal.luminosity
    :members:

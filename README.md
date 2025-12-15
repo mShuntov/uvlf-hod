@@ -1,4 +1,4 @@
-# uvlf-hod
+# halogal
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -21,14 +21,14 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 ### From PyPI (when published)
 
 ```bash
-pip install uvlf-hod
+pip install halogal
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/mshuntov/uvlf-hod.git
-cd uvlf-hod
+git clone https://github.com/mshuntov/halogal.git
+cd halogal
 pip install -e .
 ```
 
@@ -47,7 +47,7 @@ pip install -e .
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
-from uvlf_hod import HODModel
+from halogal import HODModel
 
 # Create model - only redshift required!
 # Uses fitted defaults from Shuntov+2025
@@ -105,8 +105,8 @@ model = HODModel(z=6.0, eps0=0.2, Mc=10**12, sigma_UV=0.5)
 ### Redshift Evolution
 
 ```python
-from uvlf_hod.models.parametrization import eps0_fz, Mc_fz
-from uvlf_hod.config import DEFAULT_REDSHIFT_EVOLUTION
+from halogal.models.parametrization import eps0_fz, Mc_fz
+from halogal.config import DEFAULT_REDSHIFT_EVOLUTION
 
 # Parameters evolve with redshift using fitted evolution
 z_array = np.linspace(4, 8, 20)
@@ -155,12 +155,12 @@ plt.show()
 
 ## Documentation
 
-Full documentation is available at https://uvlf-hod.readthedocs.io/en/latest/.
+Full documentation is available at https://halogal.readthedocs.io/en/latest/.
 
 ### Package Structure
 
 ```
-uvlf_hod/
+halogal/
 ├── __init__.py          # Public API
 ├── config.py            # Configuration and defaults
 ├── cosmology.py         # Halo mass function and bias

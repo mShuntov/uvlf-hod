@@ -1,14 +1,14 @@
-# Getting Started with uvlf-hod
+# Getting Started with halogal
 
-This guide will help you get started with the `uvlf-hod` package for modeling high-redshift galaxy populations using the unified model architecture.
+This guide will help you get started with the `halogal` package for modeling high-redshift galaxy populations using the unified model architecture.
 
 ## Installation
 
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/mshuntov/uvlf-hod.git
-cd uvlf-hod
+git clone https://github.com/mshuntov/halogal.git
+cd halogal
 ```
 
 ### Step 2: Install Dependencies
@@ -35,15 +35,15 @@ pip install -e ".[dev]"
 ### Step 3: Verify Installation
 
 ```python
-import uvlf_hod
-print(uvlf_hod.__version__)
+import halogal
+print(halogal.__version__)
 ```
 
 ## Core Concepts
 
 ### The Unified Model Architecture
 
-`uvlf-hod` uses a clean class hierarchy:
+`halogal` uses a clean class hierarchy:
 
 ```
 UVHMRModel (base class)
@@ -61,7 +61,7 @@ HODModel (full model)
 ### 1. Creating Your First Model
 
 ```python
-from uvlf_hod import HODModel
+from halogal import HODModel
 
 # Create a complete model using fitted parameters from Shuntov+2025
 model = HODModel(
@@ -133,7 +133,7 @@ The default parameters are taken at z~5.4 from Shuntov+2025.
 #### Using Defaults from Config
 
 ```python
-from uvlf_hod.config import DEFAULT_HOD_PARAMS
+from halogal.config import DEFAULT_HOD_PARAMS
 
 # All defaults from Shuntov+2025
 print(f"eps0 = {DEFAULT_HOD_PARAMS['eps0']}")           # 0.19
@@ -252,8 +252,8 @@ plt.show()
 ### Workflow 2: Redshift Evolution of Parameters
 
 ```python
-from uvlf_hod.models.parametrization import eps0_fz, Mc_fz, a_fz, b_fz
-from uvlf_hod.config import DEFAULT_REDSHIFT_EVOLUTION
+from halogal.models.parametrization import eps0_fz, Mc_fz, a_fz, b_fz
+from halogal.config import DEFAULT_REDSHIFT_EVOLUTION
 
 # Define redshift range
 z_array = np.linspace(4, 8, 20)
@@ -367,7 +367,7 @@ plt.show()
 ### Custom Cosmology
 
 ```python
-from uvlf_hod.config import CosmologyConfig
+from halogal.config import CosmologyConfig
 
 # Create custom cosmology
 custom_cosmo = CosmologyConfig(H0=67.0, Om0=0.32, Ob0=0.05)
@@ -398,7 +398,7 @@ pip install -r requirements.txt
 
 ## Getting Help
 
-- Open an issue on [GitHub](https://github.com/mshuntov/uvlf-hod/issues)
+- Open an issue on [GitHub](https://github.com/mshuntov/halogal/issues)
 - Check the examples directory
 - Read the paper: Shuntov et al. 2025, A&A 699 A231
 - Contact: marko.shuntov@nbi.ku.dk

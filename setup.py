@@ -1,11 +1,11 @@
-"""Setup configuration for uvlf-hod package."""
+"""Setup configuration for halogal package."""
 
 from setuptools import setup, find_packages
 import os
 
 # Read version
 version = {}
-with open("uvlf_hod/__version__.py") as f:
+with open("halogal/__version__.py") as f:
     exec(f.read(), version)
 
 # Read README for long description
@@ -17,14 +17,14 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
     requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 setup(
-    name="uvlf-hod",
+    name="halogal",
     version=version["__version__"],
     author="Marko Shuntov",
     author_email="marko.shuntov@nbi.ku.dk",
     description="UV Luminosity Function and Halo Occupation Distribution modeling for high-redshift galaxies",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/mshuntov/uvlf-hod",
+    url="https://github.com/mshuntov/halogal",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",

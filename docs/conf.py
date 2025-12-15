@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'uvlf-hod'
+project = 'halogal'
 copyright = '2025, Marko Shuntov'
 author = 'Marko Shuntov'
 

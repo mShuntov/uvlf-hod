@@ -20,7 +20,7 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 
 ## Installation
 
-### From PyPI (when published)
+### From PyPI (https://pypi.org/project/halogal/0.1.0/)
 
 ```bash
 pip install halogal

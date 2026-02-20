@@ -8,10 +8,14 @@ halogal Documentation
 
 .. toctree::
    :maxdepth: 2
-   
+   :caption: Contents:
+
+   installation
+   examples/basic_usage
    api/model
    api/cosmology
    api/luminosity
+
 
 API Reference
 =============

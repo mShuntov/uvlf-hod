@@ -34,6 +34,8 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',  # For NumPy/Google style docstrings
     'sphinx.ext.viewcode',
+    'nbsphinx',  # Add this
 ]
 
 html_theme = 'sphinx_rtd_theme'
+nbsphinx_execute = 'never'  # Don't execute notebooks during build

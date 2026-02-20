@@ -12,6 +12,8 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 - **Halo Occupation Distribution**: Model central and satellite galaxy populations
 - **Luminosity Functions**: Compute UV luminosity functions at high redshift
 - **Galaxy Bias**: Calculate galaxy clustering bias
+- **Correlation Functions**: Angular, real-space, and projected 2PCFs via halomod
+- **Efficient Parameter Updates**: All observables accept inline `**params` for fast MCMC loops
 - **Dust Attenuation**: Self-consistent treatment following Bouwens+2013-14
 - **Fitted Parameters**: Defaults from Shuntov+2025
 - **Redshift Evolution**: Built-in parameter evolution with redshift
@@ -46,40 +48,29 @@ pip install -e .
 
 ```python
 import numpy as np
-import matplotlib.pyplot as plt
 from halogal import HODModel
+from halogal.model import Observables
 
-# Create model - only redshift required!
+# Create model — only redshift required!
 # Uses fitted defaults from Shuntov+2025
 model = HODModel(z=6.0)
+obs = Observables(model)
 
 # Compute luminosity function
 MUV = np.linspace(-22, -16, 20)
-phi = model.luminosity_function(MUV)
-
-# Plot
-plt.semilogy(MUV, phi)
-plt.xlabel('$M_{UV}$')
-plt.ylabel('$\\Phi$ [Mpc$^{-3}$ mag$^{-1}$]')
-plt.show()
+phi = obs.luminosity_function(MUV)
 ```
 
 ### Galaxy Bias
 
 ```python
-# Compute bias with the same model
-bias = model.galaxy_bias(MUV)
-
-plt.plot(MUV, bias)
-plt.xlabel('$M_{UV}$')
-plt.ylabel('Galaxy Bias $b_g$')
-plt.show()
+bias = obs.galaxy_bias(MUV)
 ```
 
 ### UV-Halo Mass Relation
 
 ```python
-# UVHMR methods are built-in
+# UVHMR methods live directly on the model
 Mh = 1e11  # M_sun
 MUV = model.MUV(Mh)
 sfr = model.sfr(Mh)
@@ -95,11 +86,47 @@ Mh_recovered = model.Mhalo(MUV)
 ### Override Specific Parameters
 
 ```python
-# Use defaults but change star formation efficiency
-model = HODModel(z=6.0, eps0=0.25)
+# At construction
+model = HODModel(z=6.0, eps0=0.25, sigma_UV=0.5)
+obs = Observables(model)
 
-# Override multiple parameters
-model = HODModel(z=6.0, eps0=0.2, Mc=10**12, sigma_UV=0.5)
+# Or inline when computing observables — no need to recreate anything
+phi = obs.luminosity_function(MUV, eps0=0.3, sigma_UV=0.6)
+```
+
+### Efficient MCMC Fitting
+
+All observable methods on `Observables` accept `**params` keyword arguments to
+update the underlying model in-place before computing. This avoids object
+re-creation in tight loops:
+
+```python
+obs = Observables(HODModel(z=6.0))
+MUV = np.linspace(-22, -16, 20)
+
+for eps0, sigma_UV in mcmc_samples:
+    phi  = obs.luminosity_function(MUV, eps0=eps0, sigma_UV=sigma_UV)
+    bg   = obs.galaxy_bias(MUV, eps0=eps0, sigma_UV=sigma_UV)
+    mh   = obs.mean_halo_mass(-19.0, eps0=eps0, sigma_UV=sigma_UV)
+    ngal = obs.number_density(-19.0, eps0=eps0, sigma_UV=sigma_UV)
+```
+
+For correlation functions, use the initialize/update pattern which leverages
+halomod's internal caching:
+
+```python
+obs = Observables(HODModel(z=6.0))
+
+# Initialize once (expensive)
+result = obs.initialize_correlation_model(
+    MUV_thresh1=-19.1, correlation_type='angular'
+)
+
+# Update efficiently in MCMC loop
+for eps0, sigma_UV in mcmc_samples:
+    result = obs.update_correlation_model(eps0=eps0, sigma_UV=sigma_UV)
+    w_theta = result['correlation']
+    theta   = result['separation']
 ```
 
 ### Redshift Evolution
@@ -108,7 +135,6 @@ model = HODModel(z=6.0, eps0=0.2, Mc=10**12, sigma_UV=0.5)
 from halogal.models.parametrization import eps0_fz, Mc_fz
 from halogal.config import DEFAULT_REDSHIFT_EVOLUTION
 
-# Parameters evolve with redshift using fitted evolution
 z_array = np.linspace(4, 8, 20)
 
 # Get evolved parameters
@@ -124,10 +150,10 @@ Mc_z = 10**Mc_fz(
     Mc_off=DEFAULT_REDSHIFT_EVOLUTION['C_logMc']
 )
 
-# Create models with evolved parameters
+# Compute with evolved parameters inline
+obs = Observables(HODModel(z=z_array[0]))
 for z, eps0, Mc in zip(z_array, eps0_z, Mc_z):
-    model = HODModel(z=z, eps0=eps0, Mc=Mc)
-    phi = model.luminosity_function(MUV)
+    phi = obs.luminosity_function(MUV, eps0=eps0, Mc=Mc)
 ```
 
 ### Compare to Observations
@@ -135,18 +161,14 @@ for z, eps0, Mc in zip(z_array, eps0_z, Mc_z):
 ```python
 from bouwens21_data import bouwens21, redshift_centers
 
-# Load data
-obs = bouwens21['z6']
+data = bouwens21['z6']
 z_obs = redshift_centers['z6']
 
-# Create model with defaults (fitted to this data!)
-model = HODModel(z=z_obs)
-
-# Compute and compare
+obs = Observables(HODModel(z=z_obs))
 MUV_model = np.linspace(-23, -15, 50)
-phi_model = model.luminosity_function(MUV_model)
+phi_model = obs.luminosity_function(MUV_model)
 
-plt.errorbar(obs['M_AB'], obs['Fi_k'], yerr=obs['Fi_k_error'],
+plt.errorbar(data['M_AB'], data['Fi_k'], yerr=data['Fi_k_error'],
             fmt='o', label='Bouwens+2021')
 plt.semilogy(MUV_model, phi_model, '-', label='Model')
 plt.legend()
@@ -164,7 +186,7 @@ halogal/
 ├── __init__.py          # Public API
 ├── config.py            # Configuration and defaults
 ├── cosmology.py         # Halo mass function and bias
-├── model.py             # Unified UVHMR and HOD models
+├── model.py             # Unified UVHMR, HOD, and Observables
 ├── luminosity.py        # UV luminosity and dust
 └── models/
     └── parametrization.py  # Redshift parametrizations
@@ -172,27 +194,35 @@ halogal/
 
 ### Key Classes
 
-- **`HODModel`**: Main class for all galaxy population modeling (recommended)
+- **`HODModel`**: Galaxy population model combining UVHMR + HOD (parameters and occupation functions)
+- **`Observables`**: Compute observables (UVLF, bias, correlation functions) from an `HODModel`; supports efficient inline parameter updates via `**params`
 - **`UVHMRModel`**: Base class for UV-halo mass relations only
-- **`HaloMassFunction`**: Halo mass function with caching
-- **`CosmologyConfig`**: Cosmology configuration
 
 ## Model Architecture
-
-Clean, simple class hierarchy:
 
 ```
 UVHMRModel (base class)
 ├── Handles UV-halo mass relations
-├── Methods: sfr(), MUV(), Mhalo()
+├── Methods: sfr(), MUV(), Mhalo(), star_formation_efficiency()
 └── Parameters: z (required), eps0, Mc, a, b (optional)
 
 HODModel (extends UVHMRModel)
 ├── Inherits all UVHMR methods
-├── Adds occupation distributions
-├── Methods: luminosity_function(), galaxy_bias(), Ncen(), Nsat()
+├── Adds occupation distributions: Ncen(), Nsat(), Ngal()
 └── Additional parameters: sigma_UV, Mcut, Msat, asat (optional)
+
+Observables (takes an HODModel)
+├── luminosity_function(MUV, **params)
+├── galaxy_bias(MUV, **params)
+├── mean_halo_mass(MUV_thresh, **params)
+├── mean_bias(MUV_thresh, **params)
+├── number_density(MUV_thresh, **params)
+├── initialize_correlation_model() / update_correlation_model()
+└── compute_correlation_function()
 ```
+
+All `Observables` methods accept `**params` (eps0, Mc, a, b, sigma_UV, Mcut, Msat, asat)
+to update the model inline before computing.
 
 ## Default Parameters
 

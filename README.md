@@ -177,7 +177,7 @@ plt.show()
 
 ## Documentation
 
-Full documentation is available at https://halogal.readthedocs.io/en/latest/.
+Full documentation is available at https://uvlf-hod.readthedocs.io/en/latest/#.
 
 ### Package Structure
 

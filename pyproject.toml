@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+inference = [
+    "emcee>=3.1",
+    "dynesty>=2.0",
+    "corner>=2.2",
+    "schwimmbad>=0.3",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=3.0",
@@ -43,10 +49,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/halogal"
-Documentation = "https://halogal.readthedocs.io"
-Repository = "https://github.com/yourusername/halogal"
-"Bug Tracker" = "https://github.com/yourusername/halogal/issues"
+Homepage = "https://github.com/mShuntov/uvlf-hod"
+Documentation = " https://uvlf-hod.readthedocs.io/en/latest/#"
+Repository = "https://github.com/mShuntov/uvlf-hod"
+"Bug Tracker" = "https://github.com/mShuntov/uvlf-hod/issues"
 
 [tool.black]
 line-length = 88
@@ -75,6 +81,9 @@ testpaths = [
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "slow: marks tests that run a sampler or build a halomod model (deselect with '-m \"not slow\"')",
+]
 
 [tool.coverage.run]
 source = ["halogal"]

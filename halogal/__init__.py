@@ -56,6 +56,22 @@ from .models.parametrization import (
     asat_fz,
 )
 
+# Inference (MCMC fitting). Sampler/plotting backends are imported lazily
+# inside the relevant methods, so this import only needs numpy/scipy.
+from .inference import (
+    Parameter,
+    ParameterSet,
+    Uniform,
+    Normal,
+    LogUniform,
+    ModelParametrization,
+    Dataset,
+    GaussianLikelihood,
+    EmceeSampler,
+    DynestySampler,
+    InferenceResult,
+)
+
 
 
 
@@ -94,6 +110,19 @@ __all__ = [
     'Mcut_fz',
     'Msat_fz',
     'asat_fz',
+
+    # Inference
+    'Parameter',
+    'ParameterSet',
+    'Uniform',
+    'Normal',
+    'LogUniform',
+    'ModelParametrization',
+    'Dataset',
+    'GaussianLikelihood',
+    'EmceeSampler',
+    'DynestySampler',
+    'InferenceResult',
 ]
 
 

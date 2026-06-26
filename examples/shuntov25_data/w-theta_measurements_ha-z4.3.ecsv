@@ -1,0 +1,18 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: theta, unit: arcsec, datatype: float64}
+# - {name: w, datatype: float64}
+# - {name: w_err, datatype: float64}
+# meta: !!omap
+# - {Description: Angular correlation function measurements for the Ha line emitters at z~4.3. Theta is in units of arcsec}
+# schema: astropy-2.0
+theta w w_err
+0.51012 3.3463 3.2959064947446555
+1.045548 4.2667 1.6193367575955286
+3.0777479999999997 0.69275 0.6159685488115444
+7.3566 0.53022 0.23818100418799146
+18.92808 0.14296 0.10214316792130543
+45.4644 0.043702 0.022036396628305633
+108.4788 0.018285 0.026925694628922758
+247.2768 -0.017776 0.018932572773925894

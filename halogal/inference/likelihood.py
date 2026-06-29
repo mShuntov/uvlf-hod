@@ -12,6 +12,7 @@ excluded from pickling (:meth:`__getstate__`): under multiprocessing/MPI each
 worker reconstructs its own, because ``halomod`` state is not safely picklable.
 """
 
+import warnings
 from collections import OrderedDict, defaultdict
 
 import numpy as np
@@ -34,17 +35,27 @@ class GaussianLikelihood:
         occasional ``halomod`` failure at extreme parameters) are caught and the
         likelihood returns ``-inf`` for that point. Set False to surface errors
         during development.
+    hmf_points : int, optional
+        Number of mass-grid points for the colossus halo mass function used by
+        UVLF / number-density bins **that have no clustering dataset**. The
+        package default is 2048 (set in ``Observables._get_hmf``); the UVLF
+        integral is smooth, so a coarser grid (e.g. 256) is ~2.5x faster with
+        <0.1% change in Phi. Bins that include clustering ignore this and reuse
+        the ``halomod`` HMF (~110 points) instead. Default None keeps 2048.
     """
 
-    def __init__(self, datasets, parametrization, catch_errors=True):
+    def __init__(self, datasets, parametrization, catch_errors=True,
+                 hmf_points=None):
         self.datasets = list(datasets)
         if not self.datasets:
             raise ValueError("GaussianLikelihood requires at least one Dataset")
         self.parametrization = parametrization
         self.catch_errors = catch_errors
+        self.hmf_points = hmf_points
         self._validate()
         # Lazily constructed per process; see _ensure_setup / __getstate__.
         self._bins = None
+        self._warned = False
 
     def _validate(self):
         clustering_per_z = defaultdict(int)
@@ -79,7 +90,9 @@ class GaussianLikelihood:
             if d.kind == "clustering":
                 bins[d.z]["clustering"] = d
 
-        # Initialise each bin's correlation model once (expensive).
+        # Initialise each bin's correlation model once (expensive). For bins
+        # without clustering, optionally pre-seed a coarser colossus HMF so the
+        # UVLF integral is not forced onto the dense 2048-point default grid.
         for z, b in bins.items():
             d = b["clustering"]
             if d is not None:
@@ -87,6 +100,11 @@ class GaussianLikelihood:
                     MUV_thresh1=d.MUV_thresh1,
                     MUV_thresh2=d.MUV_thresh2,
                     **d.corr_kwargs,
+                )
+            elif self.hmf_points is not None:
+                from ..cosmology import get_halo_mass_function
+                b["obs"]._hmf_cache[z] = get_halo_mass_function(
+                    z, M_min=6, M_max=15, num_points=self.hmf_points
                 )
         self._bins = bins
 
@@ -122,6 +140,12 @@ class GaussianLikelihood:
             Sum of per-dataset Gaussian log-likelihoods, or ``-inf`` if any
             prediction is non-finite or (optionally) raises.
         """
+        # One-time setup (incl. the halomod correlation model) is a
+        # configuration step, not per-sample numerical noise: let its errors
+        # propagate even when catch_errors is set, so a misconfigured model
+        # fails fast and visibly instead of returning -inf for every sample.
+        self._ensure_setup()
+
         def reduce_fn(d, model):
             ll = d.log_likelihood(model)
             if not np.isfinite(ll):
@@ -132,8 +156,18 @@ class GaussianLikelihood:
             return self._accumulate(named_params, reduce_fn)
         except _NonFinite:
             return -np.inf
-        except Exception:
+        except Exception as exc:
             if self.catch_errors:
+                if not self._warned:
+                    warnings.warn(
+                        "GaussianLikelihood caught an exception during model "
+                        "evaluation and is returning -inf for this point. "
+                        "Further such warnings are suppressed. Use "
+                        "catch_errors=False or .check() to debug. "
+                        f"First error: {exc!r}",
+                        RuntimeWarning, stacklevel=2,
+                    )
+                    self._warned = True
                 return -np.inf
             raise
 
@@ -142,6 +176,34 @@ class GaussianLikelihood:
         return self._accumulate(
             named_params, lambda d, model: d.chi2(model)
         )
+
+    def check(self, named_params=None):
+        """Evaluate every dataset once with all errors surfaced.
+
+        Unlike :meth:`log_likelihood`, this ignores ``catch_errors`` and does
+        not mask non-finite values -- exceptions propagate. Use it to validate a
+        setup (e.g. the halomod/clustering configuration) *before* launching a
+        chain, where ``catch_errors`` would otherwise hide failures as ``-inf``.
+
+        Parameters
+        ----------
+        named_params : dict, optional
+            Sampling-space values; defaults to an empty dict, i.e. every
+            parameter taken from the parametrization defaults.
+
+        Returns
+        -------
+        dict
+            ``{label: log_likelihood}`` for each dataset.
+        """
+        self._ensure_setup()
+        named_params = {} if named_params is None else named_params
+        out = {}
+        for z, b in self._bins.items():
+            mp = self.parametrization.params_for_redshift(named_params, z)
+            for d in b["datasets"]:
+                out[d.label] = d.log_likelihood(d.predict(b["obs"], mp))
+        return out
 
     def predict_all(self, named_params):
         """Model predictions for every dataset, keyed by label.

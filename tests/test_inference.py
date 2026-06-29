@@ -246,6 +246,46 @@ class TestGaussianLikelihoodUVLF:
         with pytest.raises(ValueError):
             GaussianLikelihood([d1, d2], ModelParametrization("fixed_z"))
 
+    def test_hmf_points_speeds_uvlf_without_changing_result(self):
+        # A coarser HMF grid for a clustering-free bin must barely change the
+        # (smooth) UVLF likelihood.
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        ds = Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)
+        full = GaussianLikelihood([ds], ModelParametrization("fixed_z"))
+        coarse = GaussianLikelihood([ds], ModelParametrization("fixed_z"),
+                                    hmf_points=256)
+        ll_full = full.log_likelihood({"eps0": 0.19})
+        ll_coarse = coarse.log_likelihood({"eps0": 0.19})
+        assert abs(ll_coarse - ll_full) < 0.01 * abs(ll_full)
+        # the coarse bin actually used the 256-point grid
+        coarse._ensure_setup()
+        log10m, _ = coarse._bins[5.4]["obs"]._get_hmf()
+        assert len(log10m) == 256
+
+    def test_check_returns_finite_per_dataset(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma, label="uvlf")],
+            ModelParametrization("fixed_z"))
+        out = like.check({"eps0": 0.19})
+        assert set(out) == {"uvlf"} and np.isfinite(out["uvlf"])
+
+    def test_setup_error_fails_fast_even_with_catch_errors(self):
+        # A clustering dataset with a bogus halomod model makes
+        # initialize_correlation_model raise; that is a configuration error and
+        # must propagate from log_likelihood even though catch_errors=True
+        # (it must NOT be silently masked as -inf).
+        pytest.importorskip("halomod")
+        theta = np.array([1.0, 10.0, 100.0])
+        clu = Dataset.clustering(
+            z=5.4, theta=theta, w=np.ones(3), sigma=np.ones(3), MUV_thresh1=-20.0,
+            corr_kwargs=dict(correlation_type="angular",
+                             exclusion_model="NOT_A_REAL_MODEL"))
+        like = GaussianLikelihood([clu], ModelParametrization("fixed_z"),
+                                  catch_errors=True)
+        with pytest.raises(Exception):
+            like.log_likelihood({"eps0": 0.19})
+
     def test_pickle_drops_live_observables(self):
         import pickle
         MUV, phi, sigma, _ = _make_uvlf_data()
@@ -277,6 +317,32 @@ class TestSamplers:
         s = res.summary()
         assert abs(s["eps0"]["median"] - 0.19) < 0.06
         assert abs(s["logMc"]["median"] - 11.64) < 0.25
+
+    def test_processes_and_pool_are_mutually_exclusive(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        params = ParameterSet([Parameter("eps0", Uniform(0.05, 0.4))])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params))
+        with pytest.raises(ValueError):
+            EmceeSampler(params, like).run(processes=2, pool=object())
+
+    @pytest.mark.slow
+    def test_emcee_processes_parallel_runs(self):
+        # The processes= path builds the likelihood once per worker and returns
+        # finite results (UVLF-only keeps the per-call cost low).
+        MUV, phi, sigma, _ = _make_uvlf_data(seed=2)
+        params = ParameterSet([
+            Parameter("eps0", Uniform(0.05, 0.4)),
+            Parameter("logMc", Uniform(11.0, 12.3)),
+        ])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params))
+        res = EmceeSampler(params, like).run(
+            nwalkers=8, nsteps=10, processes=2, progress=False, seed=0)
+        assert res.samples.shape[1] == 2
+        assert np.all(np.isfinite(res.extras["log_prob"]))
 
     @pytest.mark.slow
     def test_dynesty_uvlf_recovery_and_evidence(self):

@@ -25,7 +25,12 @@ classifiers = [
 keywords = ["astronomy", "cosmology", "galaxies", "luminosity-function", "halo-model"]
 requires-python = ">=3.8"
 dependencies = [
-    "numpy>=1.20.0",
+    # numpy is capped below 2.0: camb's BBN predictor (pulled in via
+    # halomod -> hmf -> camb) returns a NumPy array for YHe, and numpy>=2
+    # raises "only 0-dimensional arrays can be converted to Python scalars"
+    # in camb.set_cosmology. Relax once a numpy>=2-safe camb (>=1.6.6) is the
+    # norm. See environment.yml for the recommended conda install.
+    "numpy>=1.20,<2",
     "scipy>=1.7.0",
     "astropy>=5.0.0",
     "colossus>=1.3.0",

@@ -676,7 +676,7 @@ class Observables:
                                     hmf_model='Watson', bias_model='Tinker10',
                                     concentration_model='Duffy08',
                                     halo_profile='NFW',
-                                    exclusion_model='DblSphere_',
+                                    exclusion_model='NgMatched_',
                                     sd_bias_model=None,
                                     **kwargs):
         """Initialize halomod model for efficient parameter updates.

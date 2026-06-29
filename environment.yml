@@ -1,0 +1,55 @@
+# Conda environment for halogal (recommended install path).
+#
+# IMPORTANT: use a fast solver. The classic conda solver can take 20+ minutes
+# on this stack (the numpy<2 backtrack). Use mamba/micromamba instead -- it
+# solves in seconds:
+#
+#   # Option A: micromamba (standalone, no base install needed)
+#   micromamba env create -f environment.yml
+#   micromamba activate halogal
+#   pip install -e .            # install halogal itself
+#
+#   # Option B: mamba (drop-in for conda)
+#   mamba env create -f environment.yml && conda activate halogal && pip install -e .
+#
+#   # Option C: plain conda -- works, but enable the libmamba solver first:
+#   #   conda install -n base conda-libmamba-solver
+#   #   conda env create -f environment.yml --solver=libmamba
+#
+# Why conda / why the pins:
+#  * camb ships compiled Fortran; conda-forge provides a prebuilt binary, which
+#    avoids the source build that fails on stock macOS toolchains
+#    ("ld: library not found for -lSystem"), especially under Rosetta.
+#  * numpy < 2 is required: camb 1.6.5's BBN predictor returns a NumPy array for
+#    YHe, and numpy >= 2 refuses the implicit array->scalar coercion in
+#    camb.set_cosmology, raising
+#    "TypeError: only 0-dimensional arrays can be converted to Python scalars"
+#    during any hmf/halomod CAMB transfer call. This pin can be relaxed once a
+#    camb that is numpy>=2 safe (>= 1.6.6) is available on conda-forge.
+name: halogal
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  # Core + compiled deps from conda-forge (camb ships a prebuilt binary here).
+  - python>=3.10,<3.13
+  - numpy<2
+  - scipy
+  - astropy
+  - camb
+  - emcee
+  - dynesty
+  - corner
+  - schwimmbad
+  - numba        # halomod JIT-compiles its halo-exclusion models with numba;
+                 # without it they are very slow (and halomod warns). With numba,
+                 # the NgMatched exclusion model costs ~the same as NoExclusion.
+  - pytest
+  - pip
+  # hmf, halomod and colossus are not on conda-forge; install from PyPI. With
+  # camb already provided by conda above, pip sees it satisfied and does NOT try
+  # to rebuild camb from source.
+  - pip:
+    - hmf
+    - halomod
+    - colossus

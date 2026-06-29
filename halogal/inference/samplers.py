@@ -17,6 +17,34 @@ from .results import InferenceResult
 __all__ = ["EmceeSampler", "DynestySampler"]
 
 
+# --- Worker-global state for pool-based parallel emcee --------------------
+# Building the per-redshift-bin Observables (the halomod correlation model) is
+# expensive (~1 s). A naive multiprocessing pool re-pickles the likelihood on
+# every emcee step, and because GaussianLikelihood.__getstate__ drops the live
+# (unpicklable) halomod state, each worker would rebuild it on *every*
+# evaluation -- erasing the parallel speedup. Instead we build it ONCE per
+# worker via a Pool initializer and read it from this module global; the emcee
+# step then only ships the cheap, module-level log-prob below.
+_WORKER_STATE = {}
+
+
+def _init_pool_worker(parameter_set, likelihood):
+    """Pool initializer: store and build the likelihood once per worker."""
+    _WORKER_STATE["parameter_set"] = parameter_set
+    _WORKER_STATE["likelihood"] = likelihood
+    likelihood._ensure_setup()  # build the halomod model once in this process
+
+
+def _pool_worker_log_prob(theta):
+    """Module-level log-posterior using the per-worker likelihood."""
+    ps = _WORKER_STATE["parameter_set"]
+    like = _WORKER_STATE["likelihood"]
+    lp = ps.log_prior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    return lp + like.log_likelihood(ps.to_dict(theta))
+
+
 class _BaseSampler:
     """Shared wiring between a parameter set and a likelihood."""
 
@@ -50,8 +78,9 @@ class EmceeSampler(_BaseSampler):
     each likelihood call expensive.
     """
 
-    def run(self, nwalkers=None, nsteps=2000, pool=None, progress=True,
-            burnin=None, thin=1, initial=None, seed=None, moves=None):
+    def run(self, nwalkers=None, nsteps=2000, processes=None, pool=None,
+            progress=True, burnin=None, thin=1, initial=None, seed=None,
+            moves=None):
         """Run the ensemble sampler.
 
         Parameters
@@ -60,9 +89,18 @@ class EmceeSampler(_BaseSampler):
             Number of walkers. Defaults to ``max(2 * ndim + 2, 32)``.
         nsteps : int, optional
             Number of steps per walker. Default 2000.
+        processes : int, optional
+            If given (>1), run in parallel across this many local processes.
+            This is the recommended way to parallelise a clustering fit: the
+            likelihood (including the expensive halomod model) is built **once
+            per worker** via a pool initializer, so the ~Ncore speedup is
+            actually realised. Mutually exclusive with ``pool``.
         pool : object, optional
-            Any object with a ``map`` method (``multiprocessing.Pool``,
-            ``schwimmbad`` MPIPool, etc.) for parallel likelihood evaluation.
+            An explicit pool with a ``map`` method (e.g. a ``schwimmbad`` MPI
+            pool for cluster runs). Note: with an external pool the likelihood
+            is re-sent each step and rebuilt per evaluation, so prefer
+            ``processes`` on a single machine. Mutually exclusive with
+            ``processes``.
         progress : bool, optional
             Show a progress bar.
         burnin : int, optional
@@ -83,6 +121,9 @@ class EmceeSampler(_BaseSampler):
         """
         import emcee
 
+        if processes is not None and pool is not None:
+            raise ValueError("Pass either 'processes' or 'pool', not both")
+
         ndim = self.parameter_set.ndim
         if nwalkers is None:
             nwalkers = max(2 * ndim + 2, 32)
@@ -93,10 +134,30 @@ class EmceeSampler(_BaseSampler):
         if initial is None:
             initial = self.parameter_set.initial(nwalkers, rng=rng)
 
-        sampler = emcee.EnsembleSampler(
-            nwalkers, ndim, self._log_prob, pool=pool, moves=moves
-        )
-        sampler.run_mcmc(initial, nsteps, progress=progress)
+        # Choose the log-prob callable and (optionally) build an owned pool that
+        # constructs the likelihood once per worker.
+        own_pool = None
+        if processes is not None and processes > 1:
+            from multiprocessing import Pool
+            own_pool = Pool(
+                processes,
+                initializer=_init_pool_worker,
+                initargs=(self.parameter_set, self.likelihood),
+            )
+            pool = own_pool
+            log_prob_fn = _pool_worker_log_prob
+        else:
+            log_prob_fn = self._log_prob
+
+        try:
+            sampler = emcee.EnsembleSampler(
+                nwalkers, ndim, log_prob_fn, pool=pool, moves=moves
+            )
+            sampler.run_mcmc(initial, nsteps, progress=progress)
+        finally:
+            if own_pool is not None:
+                own_pool.close()
+                own_pool.join()
 
         flat = sampler.get_chain(discard=burnin, thin=thin, flat=True)
         log_prob = sampler.get_log_prob(discard=burnin, thin=thin, flat=True)

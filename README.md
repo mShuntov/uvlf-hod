@@ -30,7 +30,7 @@ pip install halogal
 
 ```bash
 git clone https://github.com/mshuntov/halogal.git
-cd halogal
+cd uvlf-hod
 pip install -e .
 ```
 

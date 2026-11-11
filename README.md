@@ -1,6 +1,6 @@
 # halogal
 
-[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Python package for modeling UV luminosity functions and galaxy clustering using Halo Occupation Distribution (HOD) models for high-redshift galaxies.
@@ -14,13 +14,14 @@ A Python package for modeling UV luminosity functions and galaxy clustering usin
 - **Galaxy Bias**: Calculate galaxy clustering bias
 - **Correlation Functions**: Angular, real-space, and projected 2PCFs via halomod
 - **Efficient Parameter Updates**: All observables accept inline `**params` for fast MCMC loops
+- **Bayesian Inference**: `halogal.inference` fits the model to UVLF, clustering and number-density data with `emcee` or `dynesty` behind one interface
 - **Dust Attenuation**: Self-consistent treatment following Bouwens+2013-14
 - **Fitted Parameters**: Defaults from Shuntov+2025
 - **Redshift Evolution**: Built-in parameter evolution with redshift
 
 ## Installation
 
-### From PyPI (https://pypi.org/project/halogal/0.1.0/)
+### From PyPI (https://pypi.org/project/halogal/)
 
 ```bash
 pip install halogal
@@ -34,9 +35,24 @@ cd halogal
 pip install -e .
 ```
 
+To fit data you also need the samplers:
+
+```bash
+pip install "halogal[inference]"     # emcee, dynesty, corner, h5py, schwimmbad
+```
+
+The compiled dependencies (notably `camb`, pulled in by `halomod`) install most
+reliably from conda-forge; `environment.yml` encodes a known-good stack:
+
+```bash
+micromamba env create -f environment.yml
+micromamba activate halogal
+pip install -e .
+```
+
 ### Dependencies
 
-- numpy >= 1.20
+- numpy >= 1.20, < 2 (required by `camb`)
 - scipy >= 1.7
 - astropy >= 5.0
 - colossus >= 1.3
@@ -129,6 +145,46 @@ for eps0, sigma_UV in mcmc_samples:
     theta   = result['separation']
 ```
 
+### Fitting Data (`halogal.inference`)
+
+```python
+from halogal.inference import (
+    Dataset, GaussianLikelihood, ParameterSet, Parameter,
+    Uniform, ModelParametrization, EmceeSampler,
+)
+
+# What to fit: any mix of UVLF, clustering and number-density datasets
+data = [
+    Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=phi_err),
+    Dataset.clustering(z=5.4, theta=theta_arcsec, w=w, sigma=w_err,
+                       MUV_thresh1=-20.0,
+                       corr_kwargs=dict(theta_min=0.5, theta_max=3600.0)),
+]
+
+# Which parameters are free (masses are sampled in log10)
+params = ParameterSet([
+    Parameter("eps0", Uniform(0.02, 0.4)),
+    Parameter("logMc", Uniform(10.5, 12.5)),
+    Parameter("sigma_UV", Uniform(0.2, 1.3)),
+    Parameter("b", value=0.65, fixed=True),
+])   # anything not listed stays at its published default
+
+like = GaussianLikelihood(data, ModelParametrization("fixed_z", params))
+like.check()   # evaluate once with all errors surfaced
+
+result = EmceeSampler(params, like).run(
+    nwalkers=32, processes=8, backend="chain.h5",
+    convergence=True, max_steps=20000)
+print(result)
+result.corner_plot()
+result.save("fit_z5.4")
+```
+
+Use `ModelParametrization("evolution", params)` with datasets at several
+redshifts to fit the linear redshift evolution instead, and `DynestySampler`
+for the Bayesian evidence. See `docs/inference.md`,
+`examples/inference_tutorial.ipynb` and `examples/fit_shuntov25.py`.
+
 ### Redshift Evolution
 
 ```python
@@ -188,6 +244,14 @@ halogal/
 ├── cosmology.py         # Halo mass function and bias
 ├── model.py             # Unified UVHMR, HOD, and Observables
 ├── luminosity.py        # UV luminosity and dust
+├── crosscorr.py         # Cross-correlations of two magnitude-selected samples
+├── inference/           # MCMC / nested-sampling fits
+│   ├── parameters.py       # Priors, Parameter, ParameterSet
+│   ├── parametrization.py  # fixed-z / evolution parameter mapping
+│   ├── data.py             # Dataset (UVLF, clustering, number density)
+│   ├── likelihood.py       # GaussianLikelihood
+│   ├── samplers.py         # EmceeSampler, DynestySampler
+│   └── results.py          # InferenceResult
 └── models/
     └── parametrization.py  # Redshift parametrizations
 ```
@@ -258,6 +322,8 @@ Evolution parameters available in `DEFAULT_REDSHIFT_EVOLUTION`.
 See the `examples/` directory for detailed examples:
 
 - `basic_usage.ipynb`: Interactive Jupyter notebook with complete workflow
+- `inference_tutorial.ipynb`: Injection-recovery tutorial for `halogal.inference`
+- `fit_shuntov25.py`: Production-style parallel fit script (checkpointed)
 - `bouwens21_data.py`: Observational data compilation
 
 ## Testing
@@ -265,7 +331,8 @@ See the `examples/` directory for detailed examples:
 Run tests with pytest:
 
 ```bash
-pytest tests/
+pytest tests/ -m "not slow"   # fast unit tests (a few seconds)
+pytest tests/                 # also runs the samplers (several minutes)
 ```
 
 ## Contributing

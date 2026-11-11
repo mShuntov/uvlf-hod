@@ -1,3 +1,3 @@
-"""Version information for uvlf-hod package."""
+"""Version information for the halogal package."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

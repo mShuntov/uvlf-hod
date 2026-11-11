@@ -34,7 +34,8 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',  # For NumPy/Google style docstrings
     'sphinx.ext.viewcode',
-    'nbsphinx',  # Add this
+    'nbsphinx',
+    'myst_parser',  # Markdown pages (inference.md, crosscorrelations.md)
 ]
 
 html_theme = 'sphinx_rtd_theme'

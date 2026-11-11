@@ -15,9 +15,20 @@ Each clustering likelihood call is ~0.5-1 s, so parallelise across cores.
 ``EmceeSampler.run(processes=N)`` builds the (expensive) halomod model once per
 worker, so the speed-up is actually realised.
 
-The H-alpha/[O III] emitter UVLF points are not in the public data repo (only a
-best-fit model band is). Add them in ``uvlf_points`` to fit the full likelihood;
-until then the fit uses Bouwens+2021 UVLF + clustering.
+The chain is checkpointed to ``<out>.h5`` every step: re-running the same
+command resumes it (delete the file to start afresh). Add ``--converge`` to
+stop on the autocorrelation-time criterion instead of after ``--nsteps``.
+
+Caveats of this example relative to the published analysis
+----------------------------------------------------------
+* The H-alpha/[O III] emitter UVLF points are not in the public data repo (only
+  a best-fit model band is). Add them in ``uvlf_points`` to fit the full
+  likelihood; until then the fit uses Bouwens+2021 UVLF + clustering.
+* The model w(theta) carries no integral-constraint correction, so by default
+  only theta < ``--theta-max`` (60 arcsec) is fitted. The two largest-scale
+  points of each measurement are consistent with zero or negative, and the
+  ~108 arcsec points of the z=5.4 and z=7.3 samples carry quoted errors of
+  ~5e-4 that would dominate chi^2 on their own.
 """
 
 import argparse
@@ -48,7 +59,10 @@ BINS = {
 
 # Forwarded to initialize_correlation_model. On the recommended env (numpy<2)
 # CAMB works; add transfer_model='EH' if you must run under numpy>=2.
-CORR_KW = dict(correlation_type="angular", znum=30, theta_num=30)
+# theta_min/theta_max [arcsec] must bracket the data: the measurements start at
+# ~0.4 arcsec, below halogal's default model grid (1 arcsec).
+CORR_KW = dict(correlation_type="angular", znum=30, theta_num=40,
+               theta_min=0.3, theta_max=3600.0)
 HMF_POINTS = 256
 
 
@@ -58,18 +72,20 @@ def uvlf_points(cfg):
     return np.asarray(bw["M_AB"]), np.asarray(bw["Fi_k"]), np.asarray(bw["Fi_k_error"])
 
 
-def datasets_for(tags):
+def datasets_for(tags, theta_max=60.0):
     out = []
     for tag in tags:
         cfg = BINS[tag]
         z = cfg["z"]
         t = Table.read(DATA / f"w-theta_measurements_{tag}.ecsv")
+        theta, w, w_err = (np.array(t[c]) for c in ("theta", "w", "w_err"))
+        keep = theta < theta_max
         muv, phi, err = uvlf_points(cfg)
         out.append(Dataset.uvlf(z=z, MUV=muv, phi=phi, sigma=err,
                                 label=f"UVLF {tag}"))
         out.append(Dataset.clustering(
-            z=z, theta=np.array(t["theta"]), w=np.array(t["w"]),
-            sigma=np.array(t["w_err"]), MUV_thresh1=cfg["muv_thresh"],
+            z=z, theta=theta[keep], w=w[keep], sigma=w_err[keep],
+            MUV_thresh1=cfg["muv_thresh"],
             corr_kwargs=CORR_KW, label=f"w {tag}"))
     return out
 
@@ -111,14 +127,19 @@ def main():
     ap.add_argument("--processes", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="chain.npz")
+    ap.add_argument("--theta-max", type=float, default=60.0,
+                    help="fit w(theta) only below this scale [arcsec]")
+    ap.add_argument("--converge", action="store_true",
+                    help="stop on the autocorrelation criterion; --nsteps "
+                         "becomes the cap")
     args = ap.parse_args()
 
     if args.mode == "fixed_z":
         params = fixed_z_params()
-        data = datasets_for([args.bin])
+        data = datasets_for([args.bin], theta_max=args.theta_max)
     else:
         params = evolution_params()
-        data = datasets_for(list(BINS))
+        data = datasets_for(list(BINS), theta_max=args.theta_max)
 
     like = GaussianLikelihood(
         data, ModelParametrization(args.mode, params), hmf_points=HMF_POINTS)
@@ -128,14 +149,21 @@ def main():
 
     print(f"Running emcee: mode={args.mode} nwalkers={args.nwalkers} "
           f"nsteps={args.nsteps} processes={args.processes}")
+    checkpoint = str(Path(args.out).with_suffix(".h5"))
     result = EmceeSampler(params, like).run(
         nwalkers=args.nwalkers, nsteps=args.nsteps,
-        processes=args.processes, seed=args.seed, progress=True)
+        processes=args.processes, seed=args.seed, progress=True,
+        backend=checkpoint, convergence=args.converge)
 
     print(result)
-    np.savez(args.out, samples=result.samples, names=np.array(result.names),
-             log_prob=result.extras["log_prob"])
-    print(f"Saved {len(result.samples)} samples to {args.out}")
+    print("acceptance fraction:", result.extras["acceptance_fraction"],
+          "| autocorrelation time:", result.extras["autocorr_time"])
+    best = result.median_params()
+    print(f"chi2 at posterior median: {like.chi2(best):.1f} "
+          f"for {like.ndata} data points")
+    path = result.save(args.out)
+    print(f"Saved {len(result.samples)} samples to {path} "
+          f"(checkpoint: {checkpoint})")
 
 
 if __name__ == "__main__":

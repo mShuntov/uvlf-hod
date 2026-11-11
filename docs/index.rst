@@ -10,9 +10,9 @@ halogal Documentation
    :maxdepth: 2
    :caption: Contents:
 
-   installation
-   api
    examples/basic_usage
+   inference
+   crosscorrelations
 
    
 API Reference
@@ -27,4 +27,25 @@ API Reference
    :members:
 
 .. automodule:: halogal.luminosity
+   :members:
+
+Inference
+---------
+
+.. automodule:: halogal.inference.parameters
+   :members:
+
+.. automodule:: halogal.inference.parametrization
+   :members:
+
+.. automodule:: halogal.inference.data
+   :members:
+
+.. automodule:: halogal.inference.likelihood
+   :members:
+
+.. automodule:: halogal.inference.samplers
+   :members:
+
+.. automodule:: halogal.inference.results
    :members:

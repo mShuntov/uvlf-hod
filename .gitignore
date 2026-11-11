@@ -99,3 +99,8 @@ docs/_templates/
 *.jpg
 !docs/images/*.png
 !examples/*.png
+
+# Local tooling and run outputs
+.claude/
+examples/tutorial_chains/
+chain*.npz

@@ -68,7 +68,7 @@ Cholesky factor of each covariance is computed at `Dataset` construction; the
         |
         v
   InferenceResult           results.py
-   summary(), median_params(), corner_plot(), log_evidence
+   summary(), median_params(), corner_plot(), log_evidence, save()/load()
 ```
 
 Each layer has one responsibility:
@@ -306,9 +306,101 @@ happens once per worker.
 `DynestySampler.run` additionally infers `queue_size` from the pool
 (`pool._processes` or `pool.size`) when not given explicitly.
 
+### Use `processes=N`, not a bare `pool=`
+
+A naive pool re-pickles the bound method -- and with it the likelihood -- on
+**every** evaluation. Because `__getstate__` drops the live `halomod` state,
+each evaluation would then rebuild the correlation model (~1 s), erasing the
+parallel speed-up. Both samplers therefore take `processes=N`, which ships the
+likelihood to each worker exactly once:
+
+```python
+EmceeSampler(params, like).run(nwalkers=64, nsteps=4000, processes=8)
+DynestySampler(params, like).run(nlive=500, processes=8)
+```
+
+- `EmceeSampler` uses a `multiprocessing.Pool` initializer that stores the
+  likelihood in a worker-global and a module-level log-posterior.
+- `DynestySampler` uses `dynesty.pool.Pool`, which does the same.
+
+Before any worker is started the likelihood is built once **in the parent
+process**. This matters for robustness, not speed: an exception raised inside a
+`Pool` initializer kills the worker, `multiprocessing` respawns it, and the run
+hangs forever without reporting anything. Building in the parent turns a
+misconfigured model into an immediate, readable traceback.
+
+Run parallel fits from a script under `if __name__ == "__main__":` (see
+`examples/fit_shuntov25.py`). Anything forwarded through `corr_kwargs` -- for
+instance the redshift distribution `p1` -- must be picklable: use a frozen
+`scipy.stats` distribution's `.pdf`, not a `lambda`.
+
 ---
 
-## 7. Minimal end-to-end example
+## 7. Long runs: checkpointing, convergence, saving
+
+`EmceeSampler.run` supports crash-safe, resumable chains and an automatic
+stopping rule:
+
+```python
+result = EmceeSampler(params, like).run(
+    nwalkers=64, processes=16,
+    backend="chain.h5",       # HDF5 checkpoint; re-running resumes from it
+    convergence=True,         # stop when the autocorrelation time is stable
+    max_steps=50_000, check_every=1000, n_tau=50, tau_change=0.01,
+)
+result.extras["converged"], result.extras["n_iterations"]
+result.save("fit_z5.4")                       # -> fit_z5.4.npz
+result = InferenceResult.load("fit_z5.4")     # sampler-less, for plotting
+```
+
+- `backend=` takes a filename or an `emcee.backends.HDFBackend` (needs `h5py`).
+  If the file already holds iterations the run **resumes** from the stored
+  state and `initial` is ignored -- the basis for restarting a
+  walltime-limited cluster job.
+- `convergence=True` applies the canonical emcee criterion every
+  `check_every` steps: chain longer than `n_tau * tau` for every parameter
+  *and* `tau` changed by less than `tau_change`. `burnin` then defaults to
+  `2 * max(tau)`.
+- `InferenceResult.save` / `load` round-trip the samples, weights, evidence and
+  light diagnostics (the live sampler object is dropped).
+
+---
+
+## 8. Guards against silent failures
+
+A sampler will happily explore a likelihood that is wrong. These checks turn the
+common silent failures into errors or `-inf`:
+
+| Situation | Behaviour |
+|---|---|
+| Clustering data outside the model separation grid (`theta_min`/`theta_max` in `corr_kwargs`) | `ValueError` at setup. `np.interp` would otherwise clamp to the edge value. |
+| Evolved `eps0`, `sigma_UV` or a mass `<= 0`, or any non-finite parameter | `log_likelihood = -inf` (`ModelParametrization.is_physical`). A negative `sigma_UV` flips the sign inside `erf` and would give a finite but meaningless model. |
+| `halomod` setup error | Raised immediately, even with `catch_errors=True`. |
+| Per-sample model exception | `-inf` plus a single `RuntimeWarning`; use `like.check()` to see the traceback. |
+| Non-finite data, `sigma <= 0`, asymmetric or non-positive-definite `cov` | `ValueError` at `Dataset` construction. |
+| Two datasets with the same label | `ValueError` (labels key `check()` / `predict_all()`). |
+| `fixed_z` mode with datasets at several redshifts | `UserWarning`: the same parameters are applied to every bin. |
+| Initial value or walker outside the prior support | `ValueError`. |
+
+Always call `like.check()` once before a long chain: it evaluates every dataset
+with all errors surfaced and returns the per-dataset log-likelihood.
+
+### What the likelihood does *not* do
+
+- **Integral constraint.** The model `w(theta)` is not corrected for the
+  integral constraint of a finite survey area. On scales approaching the field
+  size, subtract it from the model (or restrict the fit to smaller scales)
+  before trusting the fit.
+- **Sample completeness.** A clustering dataset is modelled as a complete
+  `M_UV`-threshold (or -bin) sample. For a line-emitter sample this is an
+  approximation, and its UVLF is not the full-population UVLF.
+- **HMF consistency.** In a bin with clustering, the UVLF uses the `halomod`
+  mass function; without clustering it uses `colossus`. They agree to 2-5% at
+  z = 4-7, which is negligible only if the UVLF errors are larger than that.
+
+---
+
+## 9. Minimal end-to-end example
 
 A fixed-redshift fit combining a UVLF and a clustering measurement at z = 6:
 
@@ -322,7 +414,9 @@ from halogal.inference import (
 # 1. Data: any mix of observables at this redshift.
 data = [
     Dataset.uvlf(z=6, MUV=MUV, phi=phi, sigma=phi_err),
-    Dataset.clustering(z=6, theta=th, w=w, cov=w_cov, MUV_thresh1=-19.1),
+    Dataset.clustering(z=6, theta=th, w=w, cov=w_cov, MUV_thresh1=-19.1,
+                       # the model grid must cover the data (arcsec)
+                       corr_kwargs=dict(theta_min=0.5, theta_max=3600.0)),
 ]
 
 # 2. Free / fixed parameters (sampling-space names; masses in log10).
@@ -340,8 +434,9 @@ params = ParameterSet([
 # 3. Likelihood = data + parametrization.
 like = GaussianLikelihood(data, ModelParametrization("fixed_z", params))
 
-# 4. Sample, then read the posterior.
-result = EmceeSampler(params, like).run(nwalkers=64, nsteps=5000)
+# 4. Check the setup, sample, then read the posterior.
+like.check()                     # raises on a real error; {label: lnL}
+result = EmceeSampler(params, like).run(nwalkers=64, nsteps=5000, processes=8)
 print(result.summary())          # {name: {median, lower, upper, q16, q50, q84}}
 
 # Overlay the best-fit model on the data:
@@ -358,7 +453,7 @@ importance `weights` (which `summary` and `corner_plot` use automatically).
 
 ---
 
-## 8. How to extend
+## 10. How to extend
 
 **Add a new prior.** Subclass `Prior` and implement `logpdf`,
 `unit_transform`, `ref`, and `sample`. That single class then works with both

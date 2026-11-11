@@ -21,7 +21,7 @@ Cholesky factor and Gaussian normalisation constant are cached at construction.
 """
 
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve
+from scipy.linalg import LinAlgError, cho_factor, cho_solve
 
 from .parametrization import MODEL_PARAM_NAMES
 
@@ -42,10 +42,16 @@ def _build_covariance(n, cov, sigma):
             raise ValueError(
                 f"cov has shape {cov.shape}, expected ({n}, {n})"
             )
+        if not np.all(np.isfinite(cov)):
+            raise ValueError("cov contains non-finite values")
+        if not np.allclose(cov, cov.T, rtol=1e-8, atol=0.0):
+            raise ValueError("cov must be symmetric")
         return cov
     sigma = np.atleast_1d(np.asarray(sigma, dtype=float))
     if sigma.shape != (n,):
         raise ValueError(f"sigma has length {sigma.shape}, expected ({n},)")
+    if not (np.all(np.isfinite(sigma)) and np.all(sigma > 0)):
+        raise ValueError("sigma must be finite and strictly positive")
     return np.diag(sigma ** 2)
 
 
@@ -62,11 +68,24 @@ class Dataset:
         self.kind = kind
         self.z = float(z)
         self.data = np.atleast_1d(np.asarray(data, dtype=float))
+        if self.data.ndim != 1:
+            raise ValueError("data must be one-dimensional")
+        if not np.all(np.isfinite(self.data)):
+            raise ValueError(
+                "data contains non-finite values; mask them out (together "
+                "with their errors) before building the Dataset"
+            )
         self.label = label or f"{kind}_z{z:g}"
 
         self.cov = _build_covariance(self.data.size, cov, sigma)
         # Cache Cholesky factor and the Gaussian normalisation constant.
-        self._cho = cho_factor(self.cov)
+        try:
+            self._cho = cho_factor(self.cov)
+        except LinAlgError as exc:
+            raise ValueError(
+                f"covariance of dataset '{self.label}' is not positive "
+                f"definite ({exc})"
+            ) from None
         logdet = 2.0 * np.sum(np.log(np.diag(self._cho[0])))
         self._lognorm = -0.5 * (self.data.size * np.log(2.0 * np.pi) + logdet)
 
@@ -143,9 +162,12 @@ class Dataset:
             bins are correlated; a diagonal sigma is accepted but will
             underestimate parameter uncertainties.
         MUV_thresh1 : float
-            UV magnitude threshold defining the clustered sample (required).
+            Faint magnitude limit of the clustered sample (required). On its
+            own it defines a threshold sample of everything brighter.
         MUV_thresh2 : float, optional
-            Faint-end threshold for cross-correlations. Default 0.0.
+            Bright magnitude limit, for a magnitude-*binned* sample; must be
+            more negative (brighter) than ``MUV_thresh1``. The default 0.0
+            means a pure threshold sample.
         corr_kwargs : dict, optional
             Extra keyword arguments forwarded to
             :meth:`~halogal.model.Observables.initialize_correlation_model`
@@ -160,14 +182,51 @@ class Dataset:
         obj.x = np.atleast_1d(np.asarray(theta, dtype=float))
         if obj.x.shape != obj.data.shape:
             raise ValueError("theta and w must have the same length")
+        if not (np.all(np.isfinite(obj.x)) and np.all(obj.x > 0)):
+            raise ValueError("theta must be finite and strictly positive")
         obj.MUV_thresh1 = float(MUV_thresh1)
         obj.MUV_thresh2 = float(MUV_thresh2)
+        if obj.MUV_thresh2 < 0 and obj.MUV_thresh2 >= obj.MUV_thresh1:
+            raise ValueError(
+                f"MUV_thresh2 ({obj.MUV_thresh2}) must be brighter (more "
+                f"negative) than MUV_thresh1 ({obj.MUV_thresh1})"
+            )
         obj.corr_kwargs = dict(corr_kwargs or {})
         return obj
 
     # ------------------------------------------------------------------
     # Prediction
     # ------------------------------------------------------------------
+    def check_separation_range(self, separation_model):
+        """Require the data abscissa to lie inside the model separation grid.
+
+        The clustering model is evaluated on its own grid (set by
+        ``theta_min``/``theta_max`` etc. in ``corr_kwargs``) and interpolated
+        onto the data. Outside that grid ``np.interp`` would silently return
+        the edge value, so out-of-range data are rejected up front.
+
+        Parameters
+        ----------
+        separation_model : array_like
+            Model separations, in the same units as the data abscissa.
+
+        Raises
+        ------
+        ValueError
+            If any data separation falls outside the model grid.
+        """
+        sep = np.asarray(separation_model, dtype=float)
+        lo, hi = sep.min(), sep.max()
+        tol = 1e-9 * hi
+        if self.x.min() < lo - tol or self.x.max() > hi + tol:
+            raise ValueError(
+                f"dataset '{self.label}': data separations span "
+                f"[{self.x.min():g}, {self.x.max():g}] but the model grid "
+                f"covers only [{lo:g}, {hi:g}]. Widen the model grid via "
+                f"corr_kwargs (e.g. theta_min/theta_max, rp_min/rp_max) or "
+                f"drop the out-of-range points."
+            )
+
     def predict(self, observables, model_params):
         """Model prediction aligned with this dataset's abscissa.
 

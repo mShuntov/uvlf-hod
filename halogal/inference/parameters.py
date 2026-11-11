@@ -201,6 +201,11 @@ class Parameter:
             if prior is None:
                 raise ValueError(f"Free parameter '{name}' requires a prior")
             self.prior = prior
+            if value is not None and not np.isfinite(prior.logpdf(value)):
+                raise ValueError(
+                    f"Initial value {value} of parameter '{name}' lies "
+                    f"outside its prior support {prior!r}"
+                )
 
     def initial_center(self):
         """Central value used to seed walkers (initial guess or prior ref)."""

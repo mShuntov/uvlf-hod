@@ -58,6 +58,23 @@ class GaussianLikelihood:
         self._warned = False
 
     def _validate(self):
+        # Labels key the dicts returned by check() / predict_all(); a clash
+        # would silently drop a dataset from those outputs.
+        labels = [d.label for d in self.datasets]
+        dup = sorted({lab for lab in labels if labels.count(lab) > 1})
+        if dup:
+            raise ValueError(
+                f"Dataset labels must be unique; duplicated: {dup}. Pass an "
+                f"explicit label= to each Dataset constructor."
+            )
+        if self.parametrization.mode == "fixed_z" and len(self.redshifts) > 1:
+            warnings.warn(
+                "ModelParametrization mode 'fixed_z' with datasets at "
+                f"several redshifts {self.redshifts}: the same HOD parameters "
+                "are applied to every bin (no redshift evolution). Use "
+                "mode='evolution' to let them evolve.",
+                UserWarning, stacklevel=3,
+            )
         clustering_per_z = defaultdict(int)
         for d in self.datasets:
             if d.kind == "clustering":
@@ -96,11 +113,14 @@ class GaussianLikelihood:
         for z, b in bins.items():
             d = b["clustering"]
             if d is not None:
-                b["obs"].initialize_correlation_model(
+                init = b["obs"].initialize_correlation_model(
                     MUV_thresh1=d.MUV_thresh1,
                     MUV_thresh2=d.MUV_thresh2,
                     **d.corr_kwargs,
                 )
+                # np.interp would silently clamp data outside the model's
+                # separation grid to the edge value; refuse instead.
+                d.check_separation_range(init["separation"])
             elif self.hmf_points is not None:
                 from ..cosmology import get_halo_mass_function
                 b["obs"]._hmf_cache[z] = get_halo_mass_function(
@@ -120,6 +140,8 @@ class GaussianLikelihood:
             model_params = self.parametrization.params_for_redshift(
                 named_params, z
             )
+            if not self.parametrization.is_physical(model_params):
+                raise _NonFinite()
             for d in b["datasets"]:
                 model = d.predict(b["obs"], model_params)
                 total += reduce_fn(d, model)
@@ -137,8 +159,10 @@ class GaussianLikelihood:
         Returns
         -------
         float
-            Sum of per-dataset Gaussian log-likelihoods, or ``-inf`` if any
-            prediction is non-finite or (optionally) raises.
+            Sum of per-dataset Gaussian log-likelihoods, or ``-inf`` if the
+            per-redshift model parameters are unphysical (e.g. an evolved
+            ``sigma_UV <= 0``), any prediction is non-finite, or (optionally)
+            the model raises.
         """
         # One-time setup (incl. the halomod correlation model) is a
         # configuration step, not per-sample numerical noise: let its errors
@@ -172,10 +196,22 @@ class GaussianLikelihood:
             raise
 
     def chi2(self, named_params):
-        """Total generalised chi-square (diagnostic, no normalisation)."""
-        return self._accumulate(
-            named_params, lambda d, model: d.chi2(model)
-        )
+        """Total generalised chi-square (diagnostic, no normalisation).
+
+        Returns ``inf`` where the per-redshift model parameters are unphysical
+        (see :meth:`ModelParametrization.is_physical`).
+        """
+        try:
+            return self._accumulate(
+                named_params, lambda d, model: d.chi2(model)
+            )
+        except _NonFinite:
+            return np.inf
+
+    @property
+    def ndata(self):
+        """Total number of data points across all datasets."""
+        return int(sum(d.data.size for d in self.datasets))
 
     def check(self, named_params=None):
         """Evaluate every dataset once with all errors surfaced.
@@ -201,6 +237,10 @@ class GaussianLikelihood:
         out = {}
         for z, b in self._bins.items():
             mp = self.parametrization.params_for_redshift(named_params, z)
+            if not self.parametrization.is_physical(mp):
+                raise ValueError(
+                    f"Unphysical model parameters at z={z:g}: {mp}"
+                )
             for d in b["datasets"]:
                 out[d.label] = d.log_likelihood(d.predict(b["obs"], mp))
         return out

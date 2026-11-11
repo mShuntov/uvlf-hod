@@ -26,6 +26,8 @@ The ``log10`` -> linear mass conversion lives **only** here, at the boundary
 before the model is called.
 """
 
+import math
+
 from ..config import DEFAULT_HOD_PARAMS, DEFAULT_REDSHIFT_EVOLUTION
 from ..models.parametrization import RedshiftParametrization
 
@@ -208,9 +210,42 @@ class ModelParametrization:
                 offset = lookup(offset_name)
                 val = float(self._evolution.evaluate(z, slope, offset)[0])
             if is_log:
-                val = 10.0 ** val
+                try:
+                    val = 10.0 ** val
+                except OverflowError:  # absurd log-mass; rejected downstream
+                    val = math.inf
             out[model_name] = val
         return out
+
+    @staticmethod
+    def is_physical(model_params):
+        """Whether a per-redshift model parameter dict is physically valid.
+
+        Requires every value to be finite and ``eps0``, ``sigma_UV`` and the
+        masses to be strictly positive. In ``fixed_z`` mode the priors normally
+        guarantee this; in ``evolution`` mode they do not -- priors act on the
+        slopes/offsets, and a linear law can cross zero inside the fitted
+        redshift range. A non-positive ``sigma_UV`` does not make the model
+        fail: it flips the sign of the error-function argument in ``N_cen``
+        and yields a finite but meaningless prediction, so the likelihood
+        rejects such points explicitly.
+
+        Parameters
+        ----------
+        model_params : dict
+            Output of :meth:`params_for_redshift`.
+
+        Returns
+        -------
+        bool
+        """
+        for value in model_params.values():
+            if not math.isfinite(value):
+                return False
+        for name in ("eps0", "sigma_UV", "Mc", "Mcut", "Msat"):
+            if name in model_params and not model_params[name] > 0:
+                return False
+        return True
 
     def __repr__(self):
         return f"ModelParametrization(mode='{self.mode}')"

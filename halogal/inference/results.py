@@ -126,6 +126,80 @@ class InferenceResult:
         except (OSError, IOError):
             return corner.corner(self.samples, **opts)
 
+    # ------------------------------------------------------------------
+    # Persistence (sampler-less; for post-processing a finished fit)
+    # ------------------------------------------------------------------
+    # Extras keys that are plain arrays/scalars worth persisting (the live
+    # ``sampler`` object is intentionally dropped).
+    _SAVED_EXTRAS = ("log_prob", "autocorr_time", "acceptance_fraction",
+                     "burnin", "thin", "converged", "n_iterations")
+
+    def save(self, path):
+        """Save the samples and light diagnostics to ``<path>.npz``.
+
+        The live ``sampler`` in :attr:`extras` is **not** saved (it is not
+        cleanly picklable and, for a resumable run, the HDF backend already
+        holds the full chain). Reload with :meth:`load` for post-processing.
+
+        Parameters
+        ----------
+        path : str
+            Output path. ``.npz`` is appended if absent.
+
+        Returns
+        -------
+        str
+            The path written.
+        """
+        if not path.endswith(".npz"):
+            path = path + ".npz"
+        data = {
+            "names": np.array(self.names),
+            "samples": self.samples,
+            "backend": np.array(str(self.backend)),
+        }
+        if self.weights is not None:
+            data["weights"] = self.weights
+        if self.log_evidence is not None:
+            data["log_evidence"] = np.array(self.log_evidence)
+        if self.log_evidence_err is not None:
+            data["log_evidence_err"] = np.array(self.log_evidence_err)
+        for key in self._SAVED_EXTRAS:
+            val = self.extras.get(key)
+            if val is not None:
+                data["extra_" + key] = np.asarray(val)
+        np.savez(path, **data)
+        return path
+
+    @classmethod
+    def load(cls, path):
+        """Reconstruct a (sampler-less) result from :meth:`save`.
+
+        The ``parameter_set`` is not restored, so :meth:`median_params`
+        returns only the free parameters; :meth:`summary`, :meth:`get_chain`
+        and :meth:`corner_plot` work fully.
+        """
+        if not path.endswith(".npz"):
+            path = path + ".npz"
+        d = np.load(path, allow_pickle=True)
+        extras = {k[len("extra_"):]: d[k] for k in d.files
+                  if k.startswith("extra_")}
+        # unwrap 0-d arrays to python scalars
+        for k, v in list(extras.items()):
+            if getattr(v, "ndim", None) == 0:
+                extras[k] = v.item()
+        return cls(
+            names=[str(n) for n in d["names"]],
+            samples=d["samples"],
+            weights=d["weights"] if "weights" in d.files else None,
+            log_evidence=(float(d["log_evidence"])
+                          if "log_evidence" in d.files else None),
+            log_evidence_err=(float(d["log_evidence_err"])
+                              if "log_evidence_err" in d.files else None),
+            extras=extras,
+            backend=str(d["backend"]) if "backend" in d.files else None,
+        )
+
     def __str__(self):
         lines = [f"InferenceResult (backend={self.backend}, "
                  f"nsamples={len(self.samples)})"]

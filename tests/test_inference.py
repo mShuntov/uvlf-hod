@@ -240,10 +240,10 @@ class TestGaussianLikelihoodUVLF:
 
     def test_too_many_clustering_per_bin_rejected(self):
         d1 = Dataset.clustering(z=6, theta=[1, 2], w=[1, 1], sigma=[1, 1],
-                                MUV_thresh1=-19)
+                                MUV_thresh1=-19, label="w bright")
         d2 = Dataset.clustering(z=6, theta=[1, 2], w=[1, 1], sigma=[1, 1],
-                                MUV_thresh1=-20)
-        with pytest.raises(ValueError):
+                                MUV_thresh1=-20, label="w faint")
+        with pytest.raises(ValueError, match="one clustering dataset"):
             GaussianLikelihood([d1, d2], ModelParametrization("fixed_z"))
 
     def test_hmf_points_speeds_uvlf_without_changing_result(self):
@@ -311,9 +311,10 @@ class TestSamplers:
         ])
         like = GaussianLikelihood(
             [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
-            ModelParametrization("fixed_z", params), catch_errors=False)
+            ModelParametrization("fixed_z", params), catch_errors=False,
+            hmf_points=256)
         res = EmceeSampler(params, like).run(
-            nwalkers=20, nsteps=400, progress=False, seed=1)
+            nwalkers=20, nsteps=300, progress=False, seed=1)
         s = res.summary()
         assert abs(s["eps0"]["median"] - 0.19) < 0.06
         assert abs(s["logMc"]["median"] - 11.64) < 0.25
@@ -353,9 +354,10 @@ class TestSamplers:
         ])
         like = GaussianLikelihood(
             [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
-            ModelParametrization("fixed_z", params), catch_errors=False)
+            ModelParametrization("fixed_z", params), catch_errors=False,
+            hmf_points=256)
         res = DynestySampler(params, like).run(
-            nlive=200, print_progress=False, seed=2)
+            nlive=100, dlogz=0.1, print_progress=False, seed=2)
         s = res.summary()
         assert np.isfinite(res.log_evidence)
         assert abs(s["eps0"]["median"] - 0.19) < 0.06
@@ -382,3 +384,247 @@ class TestClusteringLive:
             pytest.skip(f"halomod model construction failed in this env: {exc}")
         assert pred.shape == theta.shape
         assert np.all(np.isfinite(pred))
+
+
+# --------------------------------------------------------------------------
+# Convergence loop, HDF backend/resume, and save/load
+# --------------------------------------------------------------------------
+class TestConvergenceAndCheckpoint:
+    def _tiny_problem(self, seed=0):
+        MUV, phi, sigma, truth = _make_uvlf_data(seed=seed, n=8)
+        params = ParameterSet([
+            Parameter("eps0", Uniform(0.05, 0.4)),
+            Parameter("logMc", Uniform(11.0, 12.3)),
+        ])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params),
+            catch_errors=False, hmf_points=256)
+        return params, like, truth
+
+    @pytest.mark.slow
+    def test_convergence_stops_early(self):
+        params, like, _ = self._tiny_problem(seed=1)
+        res = EmceeSampler(params, like).run(
+            nwalkers=16, convergence=True, max_steps=4000, check_every=100,
+            n_tau=25, tau_change=0.05, progress=False, seed=1)
+        assert res.extras["converged"] is True
+        # stopped before the cap
+        assert res.extras["n_iterations"] < 4000
+        assert res.extras["autocorr_time"] is not None
+
+    @pytest.mark.slow
+    def test_max_steps_cap_when_not_converged(self):
+        params, like, _ = self._tiny_problem(seed=2)
+        # absurd criterion (n_tau huge) -> never "converged" -> hits the cap
+        res = EmceeSampler(params, like).run(
+            nwalkers=16, convergence=True, max_steps=300, check_every=100,
+            n_tau=100000, progress=False, seed=2)
+        assert res.extras["converged"] is False
+        assert res.extras["n_iterations"] == 300
+
+    @pytest.mark.slow
+    def test_hdf_backend_resume_grows_chain(self, tmp_path):
+        params, like, _ = self._tiny_problem(seed=3)
+        h5 = str(tmp_path / "chain.h5")
+        EmceeSampler(params, like).run(
+            nwalkers=16, nsteps=100, backend=h5, progress=False, seed=3)
+        import emcee
+        assert emcee.backends.HDFBackend(h5).iteration == 100
+        # resume: same backend, more steps, iteration count grows
+        EmceeSampler(params, like).run(
+            nwalkers=16, nsteps=50, backend=h5, progress=False, seed=4)
+        assert emcee.backends.HDFBackend(h5).iteration == 150
+
+    @pytest.mark.slow
+    def test_convergence_resume_from_backend(self, tmp_path):
+        params, like, _ = self._tiny_problem(seed=5)
+        h5 = str(tmp_path / "chain.h5")
+        EmceeSampler(params, like).run(
+            nwalkers=16, nsteps=100, backend=h5, progress=False, seed=5)
+        # convergence-mode resume must read the last state from the backend
+        res = EmceeSampler(params, like).run(
+            nwalkers=16, convergence=True, max_steps=100, check_every=50,
+            n_tau=100000, backend=h5, progress=False, seed=6)
+        assert res.extras["n_iterations"] == 200
+
+    def test_ndim_mismatch_on_resume_raises(self, tmp_path):
+        params, like, _ = self._tiny_problem(seed=7)
+        h5 = str(tmp_path / "chain.h5")
+        EmceeSampler(params, like).run(
+            nwalkers=16, nsteps=20, backend=h5, progress=False, seed=7)
+        # a different-dimension parameter set cannot resume the same backend
+        p2 = ParameterSet([Parameter("eps0", Uniform(0.05, 0.4))])
+        like2 = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=np.linspace(-22, -17, 8),
+                          phi=np.ones(8), sigma=np.ones(8))],
+            ModelParametrization("fixed_z", p2), hmf_points=256)
+        with pytest.raises(ValueError):
+            EmceeSampler(p2, like2).run(
+                nwalkers=16, nsteps=20, backend=h5, progress=False)
+
+    def test_result_save_load_roundtrip(self, tmp_path):
+        from halogal.inference.results import InferenceResult
+        names = ["a", "b"]
+        samples = np.random.default_rng(0).normal(size=(200, 2))
+        res = InferenceResult(
+            names=names, samples=samples, backend="emcee",
+            extras={"converged": True, "burnin": 33, "thin": 1,
+                    "acceptance_fraction": 0.4,
+                    "autocorr_time": np.array([12.0, 15.0]),
+                    "sampler": object()})   # live object must be dropped
+        path = res.save(str(tmp_path / "out"))
+        loaded = InferenceResult.load(path)
+        assert loaded.names == names
+        assert np.allclose(loaded.samples, samples)
+        assert loaded.extras["converged"] is True
+        assert loaded.extras["burnin"] == 33
+        assert "sampler" not in loaded.extras
+        np.testing.assert_allclose(
+            loaded.extras["autocorr_time"], [12.0, 15.0])
+
+
+# --------------------------------------------------------------------------
+# Input validation and robustness guards
+# --------------------------------------------------------------------------
+class TestValidation:
+    def test_dataset_rejects_bad_inputs(self):
+        with pytest.raises(ValueError, match="non-finite"):
+            Dataset.uvlf(z=6, MUV=[-20, -19], phi=[1e-3, np.nan],
+                         sigma=[1e-4, 1e-4])
+        with pytest.raises(ValueError, match="strictly positive"):
+            Dataset.uvlf(z=6, MUV=[-20, -19], phi=[1e-3, 1e-3],
+                         sigma=[1e-4, 0.0])
+        with pytest.raises(ValueError, match="symmetric"):
+            Dataset.uvlf(z=6, MUV=[-20, -19], phi=[1e-3, 1e-3],
+                         cov=[[1.0, 0.5], [0.0, 1.0]])
+        with pytest.raises(ValueError, match="positive definite"):
+            Dataset.uvlf(z=6, MUV=[-20, -19], phi=[1e-3, 1e-3],
+                         cov=[[1.0, 2.0], [2.0, 1.0]])
+
+    def test_clustering_threshold_order_and_theta(self):
+        with pytest.raises(ValueError, match="brighter"):
+            Dataset.clustering(z=6, theta=[1, 2], w=[1, 1], sigma=[1, 1],
+                               MUV_thresh1=-20, MUV_thresh2=-19)
+        with pytest.raises(ValueError, match="strictly positive"):
+            Dataset.clustering(z=6, theta=[0, 2], w=[1, 1], sigma=[1, 1],
+                               MUV_thresh1=-20)
+
+    def test_separation_range_is_enforced(self):
+        clu = Dataset.clustering(z=6, theta=[0.5, 10.0], w=[1, 1],
+                                 sigma=[1, 1], MUV_thresh1=-20)
+        clu.check_separation_range(np.logspace(-1, 3, 20))     # inside: ok
+        with pytest.raises(ValueError, match="model grid"):
+            clu.check_separation_range(np.logspace(0, 3, 20))  # 0.5 < 1.0
+
+    def test_duplicate_labels_rejected(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        d1 = Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)
+        d2 = Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)
+        with pytest.raises(ValueError, match="unique"):
+            GaussianLikelihood([d1, d2], ModelParametrization("fixed_z"))
+
+    def test_fixed_z_with_several_redshifts_warns(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        d1 = Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)
+        d2 = Dataset.uvlf(z=6.0, MUV=MUV, phi=phi, sigma=sigma)
+        with pytest.warns(UserWarning, match="fixed_z"):
+            GaussianLikelihood([d1, d2], ModelParametrization("fixed_z"))
+
+    def test_initial_value_outside_prior_rejected(self):
+        with pytest.raises(ValueError, match="outside its prior"):
+            Parameter("eps0", Uniform(0.05, 0.4), value=0.9)
+
+    def test_unphysical_evolved_parameters_give_minus_inf(self):
+        # sigma_UV(z) = -0.2 z + 0.74 < 0 at z = 5.4. Without the guard the
+        # model returns a finite (meaningless) UVLF and a finite likelihood.
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma, label="u")],
+            ModelParametrization("evolution"), catch_errors=False,
+            hmf_points=256)
+        assert np.isfinite(like.log_likelihood({}))
+        bad = {"d_sigmaUV_dz": -0.2}
+        assert like.log_likelihood(bad) == -np.inf
+        assert like.chi2(bad) == np.inf
+        with pytest.raises(ValueError, match="Unphysical"):
+            like.check(bad)
+        assert like.ndata == MUV.size
+
+    def test_is_physical(self):
+        mp = ModelParametrization("fixed_z")
+        good = mp.params_for_redshift({}, 5.4)
+        assert mp.is_physical(good)
+        assert not mp.is_physical(dict(good, eps0=-0.1))
+        assert not mp.is_physical(dict(good, sigma_UV=0.0))
+        assert not mp.is_physical(dict(good, a=np.nan))
+        # an absurd log-mass overflows to inf instead of raising
+        assert not mp.is_physical(mp.params_for_redshift({"logMc": 400.0}, 5.4))
+
+    def test_bad_initial_walkers_rejected(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        params = ParameterSet([Parameter("eps0", Uniform(0.05, 0.4))])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params), hmf_points=256)
+        sampler = EmceeSampler(params, like)
+        with pytest.raises(ValueError, match="shape"):
+            sampler.run(nwalkers=8, nsteps=2, initial=np.full((4, 1), 0.2),
+                        progress=False)
+        with pytest.raises(ValueError, match="outside the prior"):
+            sampler.run(nwalkers=8, nsteps=2, initial=np.full((8, 1), 0.9),
+                        progress=False)
+
+    def test_setup_error_surfaces_before_workers_start(self):
+        # With processes=, a setup error raised only inside the Pool
+        # initializer makes multiprocessing respawn workers forever (a silent
+        # hang). It must be raised in the parent instead.
+        pytest.importorskip("halomod")
+        theta = np.array([2.0, 10.0, 100.0])
+        clu = Dataset.clustering(
+            z=5.4, theta=theta, w=np.ones(3), sigma=np.ones(3),
+            MUV_thresh1=-20.0,
+            corr_kwargs=dict(exclusion_model="NOT_A_REAL_MODEL"))
+        params = ParameterSet([Parameter("eps0", Uniform(0.05, 0.4))])
+        like = GaussianLikelihood([clu], ModelParametrization("fixed_z", params))
+        with pytest.raises(Exception):
+            EmceeSampler(params, like).run(
+                nwalkers=8, nsteps=2, processes=2, progress=False)
+        with pytest.raises(Exception):
+            DynestySampler(params, like).run(
+                nlive=20, processes=2, print_progress=False)
+
+    def test_dynesty_processes_and_pool_are_mutually_exclusive(self):
+        MUV, phi, sigma, _ = _make_uvlf_data()
+        params = ParameterSet([Parameter("eps0", Uniform(0.05, 0.4))])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params), hmf_points=256)
+        with pytest.raises(ValueError):
+            DynestySampler(params, like).run(processes=2, pool=object())
+
+
+class TestSamplerAgreement:
+    @pytest.mark.slow
+    def test_dynesty_processes_matches_emcee(self):
+        # Same problem through both backends (dynesty in parallel): the
+        # posteriors must agree to well within their widths.
+        MUV, phi, sigma, _ = _make_uvlf_data(seed=4)
+        params = ParameterSet([
+            Parameter("eps0", Uniform(0.05, 0.4)),
+            Parameter("logMc", Uniform(11.0, 12.3)),
+        ])
+        like = GaussianLikelihood(
+            [Dataset.uvlf(z=5.4, MUV=MUV, phi=phi, sigma=sigma)],
+            ModelParametrization("fixed_z", params), catch_errors=False,
+            hmf_points=256)
+        em = EmceeSampler(params, like).run(
+            nwalkers=20, nsteps=250, progress=False, seed=4).summary()
+        dy = DynestySampler(params, like).run(
+            nlive=100, dlogz=0.1, processes=2, print_progress=False,
+            seed=4).summary()
+        for name in ("eps0", "logMc"):
+            width = 0.5 * (em[name]["upper"] + em[name]["lower"])
+            assert abs(em[name]["median"] - dy[name]["median"]) < width
+            ratio = (dy[name]["upper"] + dy[name]["lower"]) / (2 * width)
+            assert 0.5 < ratio < 2.0

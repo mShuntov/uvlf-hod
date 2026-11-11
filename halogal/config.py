@@ -6,22 +6,79 @@ from colossus.cosmology import cosmology
 # Physical constants
 BARYON_FRACTION = 0.16
 
-# Default cosmological parameters
+# ---------------------------------------------------------------------------
+# Cosmology: ONE source of truth
+# ---------------------------------------------------------------------------
+# Every consumer -- Colossus (halo mass function, halo bias), Astropy
+# (distances) and halomod/hmf (correlation functions) -- is configured from
+# this single dict. They used to be specified separately, which left the UVLF
+# and the clustering describing different universes: Colossus ran with
+# sigma8=0.81, ns=1.0 while halomod silently fell back to its own Planck18
+# defaults of 0.8159 and 0.9667, a 30-48% difference in dn/dlnM at z=8.
+#
+# NOTE ON ns: 1.0 is not a measured value (Planck gives ~0.965) and looks like
+# a placeholder. It is kept here because the fitted HOD parameters in
+# DEFAULT_HOD_PARAMS were derived with it, so changing it silently would
+# invalidate them. Change it in this one place when you are ready to refit.
 DEFAULT_COSMO_PARAMS = {
     'H0': 70.0,
     'Om0': 0.3,
     'Ob0': 0.0469,
     'Tcmb0': 2.725,
-}
-
-DEFAULT_COLOSSUS_PARAMS = {
-    'flat': True,
-    'H0': 70.0,
-    'Om0': 0.3,
-    'Ob0': 0.0469,
     'sigma8': 0.81,
     'ns': 1.0,
 }
+
+# Colossus wants 'flat' and its own spelling; derived, never edited by hand.
+DEFAULT_COLOSSUS_PARAMS = {
+    'flat': True,
+    'H0': DEFAULT_COSMO_PARAMS['H0'],
+    'Om0': DEFAULT_COSMO_PARAMS['Om0'],
+    'Ob0': DEFAULT_COSMO_PARAMS['Ob0'],
+    'sigma8': DEFAULT_COSMO_PARAMS['sigma8'],
+    'ns': DEFAULT_COSMO_PARAMS['ns'],
+}
+
+
+def halomod_cosmo_kwargs(params=None):
+    """Translate halogal's cosmology into halomod/hmf keyword arguments.
+
+    Parameters
+    ----------
+    params : dict, optional
+        Cosmology parameters in halogal's spelling. Defaults to
+        ``DEFAULT_COSMO_PARAMS``.
+
+    Returns
+    -------
+    dict
+        ``{'cosmo_params': {...}, 'sigma_8': ..., 'n': ..., 'transfer_model':
+        ...}``, ready to splat into ``halomod.TracerHaloModel``.
+
+    Notes
+    -----
+    halomod takes the background cosmology as ``cosmo_params`` (which override
+    its Planck18 default) but the power-spectrum normalisation and tilt as the
+    separate top-level arguments ``sigma_8`` and ``n``. Passing only the former
+    is the trap this helper exists to close.
+
+    ``transfer_model='EH'`` matches Colossus, whose default transfer function
+    is Eisenstein & Hu (1998). halomod defaults to CAMB instead, and that
+    mismatch alone left the two halo mass functions differing by 0.21 dex at
+    z=8; with EH the residual is 0.077 dex, which is the remaining difference
+    between Colossus's ``watson13`` and hmf's ``Watson`` implementations.
+    """
+    p = DEFAULT_COSMO_PARAMS if params is None else params
+    return {
+        'cosmo_params': {
+            'Om0': p['Om0'],
+            'Ob0': p['Ob0'],
+            'H0': p['H0'],
+        },
+        'sigma_8': p['sigma8'],
+        'n': p['ns'],
+        'transfer_model': p.get('transfer_model', 'EH'),
+    }
 
 # Default HOD parameters (from fits at z~5.4)
 # Based on Shuntov et al. 2025 2025A&A...699A.231S - see Table with posterior medians
@@ -110,9 +167,26 @@ class CosmologyConfig:
         # Colossus cosmology
         cosmology.setCosmology('custom', **self.colossus_params)
         self.colossus_cosmo = cosmology.getCurrent()
-    
+
+    def halomod_params(self):
+        """Keyword arguments configuring halomod with THIS cosmology.
+
+        Returns
+        -------
+        dict
+            ``{'cosmo_params': {...}, 'sigma_8': ..., 'n': ...}``.
+
+        Examples
+        --------
+        >>> cfg = CosmologyConfig(H0=67.4)
+        >>> model = halomod.TracerHaloModel(z=8.0, **cfg.halomod_params())
+        """
+        return halomod_cosmo_kwargs(self.params)
+
     def __repr__(self):
-        return f"CosmologyConfig(H0={self.params['H0']}, Om0={self.params['Om0']})"
+        return (f"CosmologyConfig(H0={self.params['H0']}, "
+                f"Om0={self.params['Om0']}, sigma8={self.params['sigma8']}, "
+                f"ns={self.params['ns']})")
 
 
 # Default cosmology instance

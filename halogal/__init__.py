@@ -43,6 +43,12 @@ from .config import (
     DEFAULT_REDSHIFT_EVOLUTION,
 )
 
+# Cross-correlations between two magnitude-selected samples
+from .crosscorr import (
+    Selection,
+    CrossCorrelation,
+)
+
 # Models
 from .models.parametrization import (
     RedshiftParametrization,
@@ -78,6 +84,9 @@ from .inference import (
 __all__ = [
     # Version
     '__version__',
+    # Cross-correlations
+    'Selection',
+    'CrossCorrelation',
     
     # Main model classes
     'UVHMRModel',

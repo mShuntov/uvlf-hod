@@ -286,7 +286,9 @@ class HODModel(UVHMRModel):
         N_sat : float or ndarray
             Average number of satellite galaxies
         """
-        Mh = np.atleast_1d(Mh)
+        # astype(float): an integer mass array would truncate N_sat to
+        # whole numbers (and zeros_like would make it an integer array).
+        Mh = np.atleast_1d(Mh).astype(float)
         N_cen = self.Ncen(Mh, MUV_thresh)
         
         # Satellites only exist above cutoff mass
@@ -431,19 +433,32 @@ class Observables:
         
         Extracts recognized HOD parameters from ``params``, applies them
         to ``self.hod_model``, and returns any remaining kwargs.
-        
+
         Parameters
         ----------
         params : dict
             Keyword arguments, possibly containing HOD parameter overrides.
-            
+
         Returns
         -------
         remaining : dict
             Any kwargs that are not HOD parameters (passed through).
+
+        Raises
+        ------
+        TypeError
+            If any keyword is not a recognised HOD parameter. Every caller
+            used to discard the leftovers, so a misspelling such as
+            ``sigmaUV`` for ``sigma_UV`` was silently ignored and the whole
+            calculation quietly ran at the default value.
         """
         hod_updates = {k: v for k, v in params.items() if k in self._HOD_PARAM_NAMES}
         remaining = {k: v for k, v in params.items() if k not in self._HOD_PARAM_NAMES}
+        if remaining:
+            raise TypeError(
+                f"unrecognised parameter(s) {sorted(remaining)}; expected any "
+                f"of {sorted(self._HOD_PARAM_NAMES)}"
+            )
         if hod_updates:
             self.hod_model.update_parameters(**hod_updates)
         return remaining
@@ -461,7 +476,17 @@ class Observables:
         log10_mass : ndarray
             Array of log10(M/M_sun) in physical units
         hmf : ndarray
-            Halo mass function dn/dln(M) in physical units of Mpc^-3
+            Halo mass function dn/dlog10(M) in physical units of
+            Mpc^-3 dex^-1, to be integrated against ``log10_mass``.
+
+        Notes
+        -----
+        Both branches return dn/dlog10M, matching the measure every caller
+        integrates with (``x=log10_Mh``). halomod natively supplies dn/dlnM,
+        so the halomod branch applies the ln(10) change of measure; omitting
+        it made every absolute quantity on that path low by exactly 1/ln(10)
+        = 0.4343, while ratio quantities (bias, mean halo mass) were immune
+        and so looked correct.
         """
         # If halomod model exists, use its HMF for consistency
         if self._halomod_model is not None:
@@ -469,10 +494,10 @@ class Observables:
             M_h = self._halomod_model.m  # M_sun/h
             dndlnm_h = self._halomod_model.dndlnm  # (h/Mpc)^3
 
-            # Convert to physical units
+            # Convert to physical units, then dlnM -> dlog10M
             h = self._halomod_config['h']
             M_physical = M_h / h  # M_sun
-            hmf_physical = dndlnm_h * h**3  # Mpc^-3
+            hmf_physical = dndlnm_h * h**3 * np.log(10)  # Mpc^-3 dex^-1
 
             return np.log10(M_physical), hmf_physical
 
@@ -511,7 +536,9 @@ class Observables:
         """
         self._apply_params(params)
         
-        MUV_arr = np.atleast_1d(MUV_arr)
+        # astype(float): np.arange(-22, -16) is integer, and zeros_like
+        # would then silently return an all-zero integer luminosity function.
+        MUV_arr = np.atleast_1d(MUV_arr).astype(float)
         log10_Mh, hmf = self._get_hmf()
         Mh = 10**log10_Mh
         
@@ -549,7 +576,7 @@ class Observables:
         """
         self._apply_params(params)
         
-        MUV_arr = np.atleast_1d(MUV_arr)
+        MUV_arr = np.atleast_1d(MUV_arr).astype(float)  # see luminosity_function
         log10_Mh, hmf = self._get_hmf()
         Mh = 10**log10_Mh
         bias_halo = get_halo_bias(Mh, self.hod_model.z, mdef='vir', model='tinker10')
@@ -717,14 +744,17 @@ class Observables:
         if zmax is None:
             zmax = z_center + 1.0
         
-        # Set up cosmology and extract h
+        # Set up cosmology and extract h. sigma_8 and n are passed separately
+        # from cosmo_params (see config.halomod_cosmo_kwargs); omitting them
+        # silently leaves halomod on its own Planck18 defaults while Colossus
+        # uses halogal's, so the UVLF and the clustering describe different
+        # universes.
+        from .config import DEFAULT_COSMO_PARAMS, halomod_cosmo_kwargs
+        power_params = {}
         if cosmo_model is None:
-            from .config import DEFAULT_COSMO_PARAMS
-            cosmo_params = {
-                'Om0': DEFAULT_COSMO_PARAMS['Om0'],
-                'Ob0': DEFAULT_COSMO_PARAMS['Ob0'],
-                'H0': DEFAULT_COSMO_PARAMS['H0'],
-            }
+            _kw = halomod_cosmo_kwargs()
+            cosmo_params = _kw.pop('cosmo_params')
+            power_params = _kw          # sigma_8, n, transfer_model
             h = DEFAULT_COSMO_PARAMS['H0'] / 100.0
         elif isinstance(cosmo_model, dict):
             cosmo_params = cosmo_model
@@ -752,6 +782,7 @@ class Observables:
         # Halomod parameters
         halomod_params = {
             'cosmo_params' : cosmo_params,
+            **power_params,
             'z': z_center,
             'rmin': rmin * h,
             'rmax': rmax * h,
@@ -1021,9 +1052,14 @@ class HalomodHOD(halomod.hod.HODPoisson if HALOMOD_AVAILABLE else object):
     z : float
         Redshift
     MUV_thresh1 : float, optional
-        Bright-end UV magnitude threshold
+        Faint magnitude limit of the sample (the least negative bound).
+        On its own it defines a threshold sample of everything brighter.
     MUV_thresh2 : float, optional
-        Faint-end UV magnitude threshold
+        Bright magnitude limit, for a magnitude-binned sample. Must be more
+        negative (brighter) than ``MUV_thresh1``. Leave at the default (0.0)
+        for a threshold sample. Occupations are formed as
+        ``N(MUV_thresh1) - N(MUV_thresh2)``, so the reverse order would give
+        negative occupations.
     eps0, Mc, a, b, sigma_UV, Mcut, Msat, asat, add_dust : optional
         HOD parameters. Default from config.
     h : float, optional
@@ -1066,7 +1102,19 @@ class HalomodHOD(halomod.hod.HODPoisson if HALOMOD_AVAILABLE else object):
         self.z = z if z is not None else self._defaults['z']
         self.MUV_thresh1 = MUV_thresh1 if MUV_thresh1 is not None else self._defaults['MUV_thresh1']
         self.MUV_thresh2 = MUV_thresh2 if MUV_thresh2 is not None else self._defaults['MUV_thresh2']
-        
+
+        # A bin is formed as N(thresh1) - N(thresh2), so thresh2 must be the
+        # BRIGHTER (more negative) bound. The reverse order yields negative
+        # occupations, and hence a negative mean_tracer_den and NaN in
+        # sigma_central, which the n_bar^2 normalisation then hides in the
+        # auto-correlation. Fail loudly instead.
+        if self.MUV_thresh2 < 0 and self.MUV_thresh2 >= self.MUV_thresh1:
+            raise ValueError(
+                f"MUV_thresh2 ({self.MUV_thresh2}) must be more negative than "
+                f"MUV_thresh1 ({self.MUV_thresh1}): thresh1 is the faint limit "
+                "and thresh2 the bright limit of the magnitude bin."
+            )
+
         self.eps0 = eps0 if eps0 is not None else DEFAULT_HOD_PARAMS['eps0']
         self.Mc = Mc if Mc is not None else 10**DEFAULT_HOD_PARAMS['logMc']
         self.a = a if a is not None else DEFAULT_HOD_PARAMS['a']
@@ -1094,7 +1142,7 @@ class HalomodHOD(halomod.hod.HODPoisson if HALOMOD_AVAILABLE else object):
         """
         M_physical = M / self.h
         
-        if self.MUV_thresh2 > 0:
+        if self.MUV_thresh2 is not None and self.MUV_thresh2 < 0:
             N_c_bright = self.hod_model.Ncen(M_physical, self.MUV_thresh1)
             N_c_faint = self.hod_model.Ncen(M_physical, self.MUV_thresh2)
             return N_c_bright - N_c_faint
@@ -1108,7 +1156,7 @@ class HalomodHOD(halomod.hod.HODPoisson if HALOMOD_AVAILABLE else object):
         """
         M_physical = M / self.h
         
-        if self.MUV_thresh2 > 0:
+        if self.MUV_thresh2 is not None and self.MUV_thresh2 < 0:
             N_s_bright = self.hod_model.Nsat(M_physical, self.MUV_thresh1)
             N_s_faint = self.hod_model.Nsat(M_physical, self.MUV_thresh2)
             return N_s_bright - N_s_faint
